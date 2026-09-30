@@ -3,140 +3,158 @@ from dash import dcc, html, Input, Output
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import pandas as pd
+import urllib.request
+import json
 
-# ============================================================
-# 1. CARGA DE LA BASE DE DATOS REAL
-# ============================================================
-# Render leerá este archivo que subiste a GitHub
-ruta_excel = "BASE_ANUAL_DPTO_INCIDENCIAS_TOTALES.xlsx"
-df = pd.read_excel(ruta_excel, sheet_name="MATRIZ_ANUAL_DPTO")
+# =====================================================================
+# 1. CONFIGURACIÓN DE TU BASE DE DATOS (¡Modifica esto según tu Excel!)
+# =====================================================================
+ARCHIVO_EXCEL = "BASE_ANUAL_DPTO_INCIDENCIAS_TOTALES.xlsx"
+COL_DPTO = "DEPARTAMENTO"      # Nombre de tu columna de departamentos
+COL_COSTO = "COSTO_ECONOMICO"  # Nombre de tu columna de costo en soles/dólares
+COL_ANIO = "ANIO"              # Nombre de tu columna de años
+# =====================================================================
 
-# Identificar automáticamente las variables numéricas de daños
-variables_metrica = [col for col in df.columns if col not in ['AÑO', 'DPTO.']]
-df['AÑO'] = df['AÑO'].astype(int)
+# 2. CARGA Y LIMPIEZA DE DATOS
+df = pd.read_excel(ARCHIVO_EXCEL)
 
-# ============================================================
-# 2. CONFIGURACIÓN DEL DASHBOARD Y SERVIDOR (NUBE)
-# ============================================================
+# Limpieza básica para que los nombres coincidan perfectamente con el mapa
+df[COL_DPTO] = df[COL_DPTO].astype(str).str.strip().str.upper()
+# Si tienes valores vacíos en costo, los rellenamos con 0
+if COL_COSTO in df.columns:
+    df[COL_COSTO] = pd.to_numeric(df[COL_COSTO], errors='coerce').fillna(0)
+
+# Descargamos el mapa oficial (GeoJSON) de los departamentos del Perú
+url_geojson = "https://raw.githubusercontent.com/juaneladio/peru-geojson/master/peru_departamental_simple.geojson"
+with urllib.request.urlopen(url_geojson) as response:
+    peru_mapa = json.loads(response.read().decode())
+
+# Obtenemos la lista de departamentos para el menú desplegable
+lista_departamentos = df[COL_DPTO].unique().tolist()
+lista_departamentos.sort()
+lista_departamentos.insert(0, "Nacional (Todo el Perú)")
+
+# 3. INICIALIZACIÓN DE LA APP (Tema oscuro y elegante)
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
-server = app.server # ¡ESTA LÍNEA ES CRÍTICA PARA QUE RENDER FUNCIONE!
+server = app.server
 
-# ============================================================
-# 3. ESTRUCTURA VISUAL (LAYOUT)
-# ============================================================
+# 4. DISEÑO DE LA PÁGINA (Layout)
 app.layout = dbc.Container([
     # Encabezado
     dbc.Row([
-        dbc.Col(html.Div([
-            html.H2("⚡ Sistema de Monitoreo de Riesgos Naturales", className="text-warning mt-4 text-center fw-bold"),
-            html.P("Análisis Histórico de Incidencias y Daños a Nivel Departamental", className="text-center text-light mb-4")
-        ]), width=12)
+        dbc.Col(html.H2("Tablero de Control: Incidencias de Origen Natural", 
+                        className="text-center text-primary mt-4 mb-2")),
+    ]),
+    dbc.Row([
+        dbc.Col(html.P("Monitoreo de Impacto y Costo Económico por Departamento", 
+                       className="text-center text-muted mb-4")),
     ]),
 
-    # Panel principal
+    # Fila de Filtros
     dbc.Row([
-        # --- BARRA LATERAL DE CONTROLES ---
         dbc.Col([
-            dbc.Card([
-                dbc.CardHeader("⚙️ Filtros de Análisis", className="fw-bold text-dark bg-warning"),
-                dbc.CardBody([
-                    html.Label("Métrica Principal:", className="text-light fw-bold"),
-                    dcc.Dropdown(
-                        id="drop-metrica",
-                        options=[{"label": v.replace("_", " ").title(), "value": v} for v in variables_metrica],
-                        value="NUMERO_DE_INCIDENCIAS",
-                        clearable=False,
-                        className="text-dark mb-4"
-                    ),
-                    
-                    html.Label("Departamentos:", className="text-light fw-bold"),
-                    dcc.Dropdown(
-                        id="drop-dpto",
-                        options=[{"label": d, "value": d} for d in sorted(df['DPTO.'].unique())],
-                        value=sorted(df['DPTO.'].unique())[:5],
-                        multi=True,
-                        className="text-dark mb-4"
-                    ),
-                    
-                    html.Label("Rango de Años:", className="text-light fw-bold"),
-                    dcc.RangeSlider(
-                        id="slider-años",
-                        min=df['AÑO'].min(), max=df['AÑO'].max(),
-                        step=1,
-                        marks={int(y): str(y) for y in range(df['AÑO'].min(), df['AÑO'].max()+1, 2)},
-                        value=[df['AÑO'].min(), df['AÑO'].max()],
-                        tooltip={"placement": "bottom", "always_visible": True}
-                    )
-                ])
-            ], className="border-secondary shadow-lg h-100")
-        ], width=3),
+            html.Label("Seleccionar Departamento:", className="fw-bold text-info"),
+            dcc.Dropdown(
+                id='filtro-dpto',
+                options=[{'label': d, 'value': d} for d in lista_departamentos],
+                value="Nacional (Todo el Perú)", # Valor por defecto
+                clearable=False,
+                style={'color': '#000000'} # Letra negra para que se lea en fondo blanco del filtro
+            )
+        ], width=12, md=6, className="mb-4 mx-auto"),
+    ]),
 
-        # --- ZONA DE GRÁFICOS Y KPIS ---
-        dbc.Col([
-            # Fila de KPIs
-            dbc.Row([
-                dbc.Col(dbc.Card(dbc.CardBody([html.H6("Total de Registros", className="text-secondary"), html.H3(id="kpi-total", className="text-info fw-bold")])), width=4),
-                dbc.Col(dbc.Card(dbc.CardBody([html.H6("Promedio Anual", className="text-secondary"), html.H3(id="kpi-promedio", className="text-success fw-bold")])), width=4),
-                dbc.Col(dbc.Card(dbc.CardBody([html.H6("Departamento más Crítico", className="text-secondary"), html.H3(id="kpi-max-dpto", className="text-danger fw-bold")])), width=4),
-            ], className="mb-4"),
-
-            # Gráfico de Tendencia (Líneas)
-            dbc.Row([
-                dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="graf-tendencia", style={"height": "350px"}))), width=12)
-            ], className="mb-4"),
-
-            # Gráficos Inferiores (Barras y Treemap)
-            dbc.Row([
-                dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="graf-barras", style={"height": "350px"}))), width=6),
-                dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="graf-treemap", style={"height": "350px"}))), width=6),
+    # Fila de Tarjetas (KPIs)
+    dbc.Row([
+        dbc.Col(dbc.Card([
+            dbc.CardBody([
+                html.H5("Total de Incidencias", className="card-title text-secondary"),
+                html.H3(id="kpi-incidencias", className="text-white")
             ])
-        ], width=9)
+        ], color="dark", inverse=True), width=12, md=6),
+        
+        dbc.Col(dbc.Card([
+            dbc.CardBody([
+                html.H5("Costo Económico Total (S/)", className="card-title text-secondary"),
+                html.H3(id="kpi-costo", className="text-warning")
+            ])
+        ], color="dark", inverse=True), width=12, md=6),
+    ], className="mb-4"),
+
+    # Fila de Gráficos (Mapa a la izquierda, Tendencia a la derecha)
+    dbc.Row([
+        # El Mapa
+        dbc.Col(dcc.Graph(id='grafico-mapa'), width=12, lg=6, className="mb-4"),
+        # Gráfico de Líneas (Tendencia)
+        dbc.Col(dcc.Graph(id='grafico-tendencia'), width=12, lg=6, className="mb-4"),
     ])
-], fluid=True, className="pb-5")
 
-# ============================================================
-# 4. MOTOR DE INTERACTIVIDAD (CALLBACKS)
-# ============================================================
+], fluid=True, style={'padding': '20px'})
+
+
+# 5. EL CEREBRO DE LA APP (Callbacks que actualizan todo al cambiar el filtro)
 @app.callback(
-    [Output("kpi-total", "children"), Output("kpi-promedio", "children"), Output("kpi-max-dpto", "children"),
-     Output("graf-tendencia", "figure"), Output("graf-barras", "figure"), Output("graf-treemap", "figure")],
-    [Input("drop-metrica", "value"), Input("drop-dpto", "value"), Input("slider-años", "value")]
+    [Output('kpi-incidencias', 'children'),
+     Output('kpi-costo', 'children'),
+     Output('grafico-mapa', 'figure'),
+     Output('grafico-tendencia', 'figure')],
+    [Input('filtro-dpto', 'value')]
 )
-def actualizar_dashboard(metrica, dptos, rango_años):
-    dff = df[(df['DPTO.'].isin(dptos)) & (df['AÑO'] >= rango_años[0]) & (df['AÑO'] <= rango_años[1])]
+def actualizar_dashboard(dpto_seleccionado):
     
-    if dff.empty:
-        return "0", "0", "N/A", {}, {}, {}
+    # 1. Filtrar la base de datos
+    if dpto_seleccionado == "Nacional (Todo el Perú)":
+        dff = df.copy()
+        titulo_zona = "Nivel Nacional"
+    else:
+        dff = df[df[COL_DPTO] == dpto_seleccionado].copy()
+        titulo_zona = dpto_seleccionado
 
-    total = dff[metrica].sum()
-    promedio = total / len(dff['AÑO'].unique()) if len(dff['AÑO'].unique()) > 0 else 0
-    agrupado_dpto = dff.groupby('DPTO.')[metrica].sum().reset_index()
-    dpto_top = agrupado_dpto.loc[agrupado_dpto[metrica].idxmax()]['DPTO.'] if not agrupado_dpto.empty else "N/A"
+    # 2. Calcular KPIs
+    total_incidencias = len(dff)
+    
+    if COL_COSTO in dff.columns:
+        costo_total = dff[COL_COSTO].sum()
+        texto_costo = f"S/ {costo_total:,.2f}"
+    else:
+        texto_costo = "Sin datos de costo"
 
-    formato_total = f"{total:,.0f}"
-    formato_prom = f"{promedio:,.1f}"
+    # 3. Crear el Mapa
+    # Agrupamos los datos por departamento para que el mapa se coloree
+    if COL_COSTO in df.columns:
+        df_mapa = dff.groupby(COL_DPTO)[COL_COSTO].sum().reset_index()
+        variable_color = COL_COSTO
+    else:
+        df_mapa = dff.groupby(COL_DPTO).size().reset_index(name='CONTEO')
+        variable_color = 'CONTEO'
 
-    df_tendencia = dff.groupby(['AÑO', 'DPTO.'])[metrica].sum().reset_index()
-    fig_tendencia = px.line(df_tendencia, x="AÑO", y=metrica, color="DPTO.", markers=True,
-                            title=f"📈 Evolución Histórica: {metrica.replace('_', ' ').title()}")
-    fig_tendencia.update_layout(template="plotly_dark", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(l=20, r=20, t=40, b=20), legend_title_text="Dpto.")
+    fig_mapa = px.choropleth_mapbox(
+        df_mapa, geojson=peru_mapa, 
+        locations=COL_DPTO, featureidkey="properties.NOMBDEP",
+        color=variable_color,
+        color_continuous_scale="Reds",
+        mapbox_style="carto-darkmatter",
+        zoom=3.8, center={"lat": -9.189, "lon": -75.015},
+        title=f"Distribución de Impacto - {titulo_zona}"
+    )
+    fig_mapa.update_layout(margin={"r":0,"t":40,"l":0,"b":0}, template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
 
-    dpto_top10 = agrupado_dpto.nlargest(10, metrica).sort_values(metrica, ascending=True)
-    fig_barras = px.bar(dpto_top10, x=metrica, y="DPTO.", orientation='h', color=metrica, color_continuous_scale="Reds",
-                        title="🏆 Ranking Acumulado")
-    fig_barras.update_layout(template="plotly_dark", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                             margin=dict(l=20, r=20, t=40, b=20), coloraxis_showscale=False)
+    # 4. Crear Gráfico de Tendencia Anual
+    if COL_ANIO in dff.columns:
+        df_tendencia = dff.groupby(COL_ANIO).size().reset_index(name='Frecuencia')
+        fig_tendencia = px.line(
+            df_tendencia, x=COL_ANIO, y='Frecuencia', markers=True,
+            title=f"Tendencia Anual de Incidencias - {titulo_zona}",
+            color_discrete_sequence=['#00f5d4']
+        )
+    else:
+        # Si no hay columna de año, muestra un gráfico vacío
+        fig_tendencia = px.line(title="Falta la columna de Años para la tendencia")
+        
+    fig_tendencia.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
 
-    fig_treemap = px.treemap(agrupado_dpto, path=[px.Constant("Perú"), "DPTO."], values=metrica, color=metrica,
-                             color_continuous_scale="Viridis", title="🗺️ Mapa de Concentración")
-    fig_treemap.update_layout(template="plotly_dark", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                              margin=dict(l=10, r=10, t=40, b=10))
+    return f"{total_incidencias:,.0f}", texto_costo, fig_mapa, fig_tendencia
 
-    return formato_total, formato_prom, dpto_top, fig_tendencia, fig_barras, fig_treemap
 
-# ============================================================
-# 5. EJECUCIÓN DEL SERVIDOR
-# ============================================================
-if __name__ == "__main__":
-    app.run_server(debug=False)
+if __name__ == '__main__':
+    app.run_server(debug=True)
