@@ -1,160 +1,168 @@
 import dash
-from dash import dcc, html, Input, Output
+from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import pandas as pd
-import urllib.request
-import json
+import numpy as np
 
-# =====================================================================
-# 1. CONFIGURACIÓN DE TU BASE DE DATOS (¡Modifica esto según tu Excel!)
-# =====================================================================
-ARCHIVO_EXCEL = "BASE_ANUAL_DPTO_INCIDENCIAS_TOTALES.xlsx"
-COL_DPTO = "DEPARTAMENTO"      # Nombre de tu columna de departamentos
-COL_COSTO = "COSTO_ECONOMICO"  # Nombre de tu columna de costo en soles/dólares
-COL_ANIO = "ANIO"              # Nombre de tu columna de años
-# =====================================================================
-
-# 2. CARGA Y LIMPIEZA DE DATOS
-df = pd.read_excel(ARCHIVO_EXCEL)
-
-# Limpieza básica para que los nombres coincidan perfectamente con el mapa
-df[COL_DPTO] = df[COL_DPTO].astype(str).str.strip().str.upper()
-# Si tienes valores vacíos en costo, los rellenamos con 0
-if COL_COSTO in df.columns:
-    df[COL_COSTO] = pd.to_numeric(df[COL_COSTO], errors='coerce').fillna(0)
-
-# Descargamos el mapa oficial (GeoJSON) de los departamentos del Perú
-url_geojson = "https://raw.githubusercontent.com/juaneladio/peru-geojson/master/peru_departamental_simple.geojson"
-with urllib.request.urlopen(url_geojson) as response:
-    peru_mapa = json.loads(response.read().decode())
-
-# Obtenemos la lista de departamentos para el menú desplegable
-lista_departamentos = df[COL_DPTO].unique().tolist()
-lista_departamentos.sort()
-lista_departamentos.insert(0, "Nacional (Todo el Perú)")
-
-# 3. INICIALIZACIÓN DE LA APP (Tema oscuro y elegante)
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
+# 1. INICIALIZACIÓN DE LA APP (Tema Corporativo)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
 server = app.server
 
-# 4. DISEÑO DE LA PÁGINA (Layout)
+# 2. DISEÑO DE LA PÁGINA
 app.layout = dbc.Container([
+    
     # Encabezado
     dbc.Row([
-        dbc.Col(html.H2("Tablero de Control: Incidencias de Origen Natural", 
-                        className="text-center text-primary mt-4 mb-2")),
-    ]),
-    dbc.Row([
-        dbc.Col(html.P("Monitoreo de Impacto y Costo Económico por Departamento", 
-                       className="text-center text-muted mb-4")),
-    ]),
-
-    # Fila de Filtros
-    dbc.Row([
-        dbc.Col([
-            html.Label("Seleccionar Departamento:", className="fw-bold text-info"),
-            dcc.Dropdown(
-                id='filtro-dpto',
-                options=[{'label': d, 'value': d} for d in lista_departamentos],
-                value="Nacional (Todo el Perú)", # Valor por defecto
-                clearable=False,
-                style={'color': '#000000'} # Letra negra para que se lea en fondo blanco del filtro
-            )
-        ], width=12, md=6, className="mb-4 mx-auto"),
-    ]),
-
-    # Fila de Tarjetas (KPIs)
-    dbc.Row([
-        dbc.Col(dbc.Card([
-            dbc.CardBody([
-                html.H5("Total de Incidencias", className="card-title text-secondary"),
-                html.H3(id="kpi-incidencias", className="text-white")
-            ])
-        ], color="dark", inverse=True), width=12, md=6),
-        
-        dbc.Col(dbc.Card([
-            dbc.CardBody([
-                html.H5("Costo Económico Total (S/)", className="card-title text-secondary"),
-                html.H3(id="kpi-costo", className="text-warning")
-            ])
-        ], color="dark", inverse=True), width=12, md=6),
-    ], className="mb-4"),
-
-    # Fila de Gráficos (Mapa a la izquierda, Tendencia a la derecha)
-    dbc.Row([
-        # El Mapa
-        dbc.Col(dcc.Graph(id='grafico-mapa'), width=12, lg=6, className="mb-4"),
-        # Gráfico de Líneas (Tendencia)
-        dbc.Col(dcc.Graph(id='grafico-tendencia'), width=12, lg=6, className="mb-4"),
-    ])
-
-], fluid=True, style={'padding': '20px'})
-
-
-# 5. EL CEREBRO DE LA APP (Callbacks que actualizan todo al cambiar el filtro)
-@app.callback(
-    [Output('kpi-incidencias', 'children'),
-     Output('kpi-costo', 'children'),
-     Output('grafico-mapa', 'figure'),
-     Output('grafico-tendencia', 'figure')],
-    [Input('filtro-dpto', 'value')]
-)
-def actualizar_dashboard(dpto_seleccionado):
-    
-    # 1. Filtrar la base de datos
-    if dpto_seleccionado == "Nacional (Todo el Perú)":
-        dff = df.copy()
-        titulo_zona = "Nivel Nacional"
-    else:
-        dff = df[df[COL_DPTO] == dpto_seleccionado].copy()
-        titulo_zona = dpto_seleccionado
-
-    # 2. Calcular KPIs
-    total_incidencias = len(dff)
-    
-    if COL_COSTO in dff.columns:
-        costo_total = dff[COL_COSTO].sum()
-        texto_costo = f"S/ {costo_total:,.2f}"
-    else:
-        texto_costo = "Sin datos de costo"
-
-    # 3. Crear el Mapa
-    # Agrupamos los datos por departamento para que el mapa se coloree
-    if COL_COSTO in df.columns:
-        df_mapa = dff.groupby(COL_DPTO)[COL_COSTO].sum().reset_index()
-        variable_color = COL_COSTO
-    else:
-        df_mapa = dff.groupby(COL_DPTO).size().reset_index(name='CONTEO')
-        variable_color = 'CONTEO'
-
-    fig_mapa = px.choropleth_mapbox(
-        df_mapa, geojson=peru_mapa, 
-        locations=COL_DPTO, featureidkey="properties.NOMBDEP",
-        color=variable_color,
-        color_continuous_scale="Reds",
-        mapbox_style="carto-darkmatter",
-        zoom=3.8, center={"lat": -9.189, "lon": -75.015},
-        title=f"Distribución de Impacto - {titulo_zona}"
-    )
-    fig_mapa.update_layout(margin={"r":0,"t":40,"l":0,"b":0}, template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-
-    # 4. Crear Gráfico de Tendencia Anual
-    if COL_ANIO in dff.columns:
-        df_tendencia = dff.groupby(COL_ANIO).size().reset_index(name='Frecuencia')
-        fig_tendencia = px.line(
-            df_tendencia, x=COL_ANIO, y='Frecuencia', markers=True,
-            title=f"Tendencia Anual de Incidencias - {titulo_zona}",
-            color_discrete_sequence=['#00f5d4']
+        dbc.Col(
+            html.Div([
+                html.H2("Simulador DSGE: Modelo Neokeynesiano", className="text-white fw-bold m-0"),
+                html.P("Funciones de Impulso-Respuesta (IRF) con parámetros estructurales personalizables", className="text-light m-0 mt-2")
+            ], className="p-4 rounded shadow-sm text-center mb-4 mt-3", style={'backgroundColor': '#2c3e50'})
         )
-    else:
-        # Si no hay columna de año, muestra un gráfico vacío
-        fig_tendencia = px.line(title="Falta la columna de Años para la tendencia")
+    ]),
+
+    dbc.Row([
         
-    fig_tendencia.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+        # ================= PANEL DE CONTROL (PARÁMETROS) =================
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader(html.H5("Parámetros Estructurales", className="fw-bold m-0")),
+                dbc.CardBody([
+                    
+                    html.Label("Sensibilidad IS a la tasa (1/σ):", className="fw-bold mt-2 text-primary"),
+                    dcc.Input(id='param-sigma', type='number', value=0.5, step=0.1, className="form-control mb-2"),
+                    
+                    html.Label("Pendiente Curva Phillips (κ):", className="fw-bold mt-2 text-primary"),
+                    dcc.Input(id='param-kappa', type='number', value=0.15, step=0.05, className="form-control mb-2"),
 
-    return f"{total_incidencias:,.0f}", texto_costo, fig_mapa, fig_tendencia
+                    html.Hr(),
+                    html.H6("Regla de Taylor (Banco Central)", className="fw-bold text-secondary"),
+                    
+                    html.Label("Aversión a la Inflación (φ_π):", className="fw-bold mt-1"),
+                    dcc.Input(id='param-phipi', type='number', value=1.5, step=0.1, className="form-control mb-2"),
+                    
+                    html.Label("Respuesta al PBI (φ_y):", className="fw-bold mt-1"),
+                    dcc.Input(id='param-phiy', type='number', value=0.5, step=0.1, className="form-control mb-2"),
+                    
+                    html.Label("Suavización de Tasa (ρ):", className="fw-bold mt-1"),
+                    dcc.Input(id='param-rho', type='number', value=0.7, step=0.05, className="form-control mb-3"),
+
+                    html.Hr(),
+                    html.H6("Configuración del Choque", className="fw-bold text-danger"),
+                    dcc.Dropdown(
+                        id='tipo-choque',
+                        options=[
+                            {'label': 'Shock de Oferta (Inflacionario)', 'value': 'oferta'},
+                            {'label': 'Shock de Demanda (Consumo)', 'value': 'demanda'},
+                            {'label': 'Shock de Política Monetaria (Tasa)', 'value': 'monetario'}
+                        ],
+                        value='oferta', clearable=False, className="mb-2"
+                    ),
+                    
+                    html.Label("Magnitud del Choque:", className="fw-bold mt-1"),
+                    dcc.Input(id='magnitud-choque', type='number', value=1.0, step=0.1, className="form-control mb-4"),
+
+                    # EL BOTÓN DE EJECUCIÓN (Gatillo)
+                    html.Div(
+                        html.Button('EJECUTAR SIMULACIÓN', id='btn-correr', n_clicks=0, 
+                                    className="btn btn-success btn-lg w-100 fw-bold shadow-sm"),
+                        className="d-grid gap-2"
+                    )
+
+                ])
+            ], className="shadow-sm border-0", style={"height": "100%"})
+        ], width=12, lg=3, className="mb-4"),
+        
+        # ================= PANEL DE RESULTADOS (IRFs) =================
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.H4("Funciones de Impulso-Respuesta (Desviación % del EE)", className="card-title text-secondary fw-bold mb-4"),
+                    dcc.Graph(id='grafico-irf', style={"height": "650px"})
+                ])
+            ], className="shadow-sm border-0", style={"height": "100%"})
+        ], width=12, lg=9, className="mb-4")
+        
+    ])
+], fluid=True, style={'backgroundColor': '#f8f9fa', 'minHeight': '100vh', 'padding': '20px'})
 
 
-if __name__ == '__main__':
+# 3. EL CEREBRO MATEMÁTICO (Resolver y Graficar)
+@app.callback(
+    Output('grafico-irf', 'figure'),
+    Input('btn-correr', 'n_clicks'), # Solo el botón detona el cálculo
+    [State('param-sigma', 'value'),  # Los State extraen los valores silenciosamente
+     State('param-kappa', 'value'),
+     State('param-phipi', 'value'),
+     State('param-phiy', 'value'),
+     State('param-rho', 'value'),
+     State('tipo-choque', 'value'),
+     State('magnitud-choque', 'value')]
+)
+def calcular_modelo(n_clicks, sigma, kappa, phi_pi, phi_y, rho, tipo, magnitud):
+    
+    # Validaciones de seguridad por si dejas un cuadro vacío
+    sigma = sigma or 0.5
+    kappa = kappa or 0.15
+    phi_pi = phi_pi or 1.5
+    phi_y = phi_y or 0.5
+    rho = rho or 0.7
+    magnitud = magnitud or 1.0
+
+    T = 40 # 40 trimestres
+    y = np.zeros(T)   # Brecha del PBI
+    pi = np.zeros(T)  # Inflación
+    i = np.zeros(T)   # Tasa de Interés
+
+    # Impacto inicial en t=0 según el tipo de choque
+    if tipo == 'oferta':
+        pi[0] = magnitud          # Sube la inflación directo
+        y[0] = -0.5 * magnitud    # Cae el producto
+    elif tipo == 'demanda':
+        y[0] = magnitud           # Sube el consumo/producto
+        pi[0] = 0.3 * magnitud    # Presiona precios al alza
+    elif tipo == 'monetario':
+        i[0] = magnitud           # El BCR sube la tasa sorpresivamente
+        y[0] = -sigma * magnitud  # Contrae la demanda
+        pi[0] = -kappa * magnitud # Enfría los precios
+
+    # Sistema dinámico recursivo (VAR Estructural Linealizado)
+    for t in range(1, T):
+        # 1. Regla de Taylor (El BCR reacciona a la inflación y PBI del periodo anterior para suavizar)
+        i[t] = rho * i[t-1] + (1 - rho) * (phi_pi * pi[t-1] + phi_y * y[t-1])
+        
+        # 2. Curva IS (El producto depende de la tasa de interés real esperada/pasada)
+        tasa_real = i[t-1] - pi[t-1]
+        y[t] = 0.8 * y[t-1] - sigma * tasa_real
+        
+        # 3. Curva de Phillips (La inflación depende de la inercia y la brecha del producto actual)
+        pi[t] = 0.6 * pi[t-1] + kappa * y[t]
+
+    # Consolidar datos para el gráfico
+    df_irf = pd.DataFrame({
+        'Trimestre': np.tile(np.arange(T), 3),
+        'Desviación (%)': np.concatenate([y, pi, i]),
+        'Variable': ['1. Brecha de Producción (y)']*T + ['2. Inflación (π)']*T + ['3. Tasa de Política (i)']*T
+    })
+
+    # Construir Subplots con Plotly Express
+    fig = px.line(df_irf, x='Trimestre', y='Desviación (%)', facet_col='Variable', color='Variable',
+                  color_discrete_sequence=['#2980b9', '#c0392b', '#27ae60'])
+    
+    fig.update_layout(template="plotly_white", showlegend=False, 
+                      margin=dict(t=50, l=20, r=20, b=20),
+                      font=dict(size=13))
+    
+    # Ajustes visuales de las escalas (cada gráfico tiene su propio eje Y)
+    fig.update_yaxes(matches=None, showticklabels=True) 
+    fig.add_hline(y=0, line_dash="solid", line_color="black", opacity=0.4, line_width=1.5)
+    
+    # Limpiar los títulos automáticos molestos de Plotly
+    fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1], font=dict(weight='bold')))
+
+    return fig
+
+
+    if __name__ == '__main__':
     app.run_server(debug=True)
