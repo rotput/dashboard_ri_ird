@@ -7,7 +7,7 @@ import numpy as np
 
 # 1. INICIALIZACIÓN DE LA APP (Tema Corporativo)
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
-server = app.server
+server = app.server  # <-- PIEZA CLAVE PARA RENDER (Gunicorn)
 
 # 2. DISEÑO DE LA PÁGINA
 app.layout = dbc.Container([
@@ -163,6 +163,5 @@ def calcular_modelo(n_clicks, sigma, kappa, phi_pi, phi_y, rho, tipo, magnitud):
 
     return fig
 
-
-    if __name__ == '__main__':
-    app.run_server(debug=True)
+if __name__ == '__main__':
+    app.run(debug=True)
