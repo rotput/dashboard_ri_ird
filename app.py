@@ -1,7 +1,8 @@
 # =============================================================================
-#  DASHBOARD: ÍNDICE DE RIESGO DE DESASTRES (IRD) - PERÚ 2003-2025
-#  Pega todo en UNA celda de JupyterLab y ejecútala.
-#  Se abre en: http://127.0.0.1:8050  (portada; el tablero del IRD está en /ird)
+#  SEGUIMIENTO DE ÍNDICES DE DESASTRES - PERÚ
+#  Portada (/) + Índices climáticos mensuales (/indices-mensuales) + IRD (/ird)
+#  Archivos junto a app.py: INDICE_IRD_FINAL_ROBUSTO.xlsx e ICEM.xlsx
+#  Pega todo en UNA celda de JupyterLab y ejecútala. Se abre en: http://127.0.0.1:8050
 #
 #  Librerías (una sola vez, en otra celda):
 #      !pip install -U dash plotly pandas openpyxl
@@ -94,7 +95,7 @@ C = {
     "pacifico": "#0b3a66", "pacifico_medio": "#1f6fb2", "niebla": "#edf3f9",
     "superficie": "#ffffff", "borde": "#d5e2ef", "tinta": "#0f2f50",
     "tinta_2": "#3f6488", "tinta_3": "#6f8cab", "rejilla": "#e6eef6",
-    "contexto": "#a7bcd2", "mejora": "#2a78d6", "empeora": "#e34948",
+    "contexto": "#a7bcd2", "mejora": "#2a78d6", "empeora": "#e34948", "azul_suave": "#e3eefa",
 }
 COLORES_DIMENSION = {"Humana": "#e87ba4", "Social": "#2a78d6",
                      "Infraestructura": "#1baf7a", "Productiva": "#4a3aa7"}
@@ -121,11 +122,11 @@ SUBTITULO_PORTADA = ("Tres tableros para seguir las amenazas climáticas, el rie
                      "y la situación de América Latina.")
 RUTA_IRD = "/ird"
 SECCIONES = [
-    {"ruta": "/indices-mensuales", "icono": "ola", "lista": False,
+    {"ruta": "/indices-mensuales", "icono": "ola", "lista": True,
      "titulo": "Índices climáticos mensuales",
-     "descripcion": "Seguimiento mes a mes del ICEN, el ONI y otros índices que anticipan "
-                    "El Niño y La Niña.",
-     "etiquetas": ["ICEN", "ONI", "Otros índices"]},
+     "descripcion": "Seguimiento mes a mes de los índices que miden si el mar está en condición "
+                    "cálida, neutra o fría.",
+     "etiquetas": ["LABCOS", "ITCP", "ICEN", "EHNOS"]},
     {"ruta": RUTA_IRD, "icono": "medidor", "lista": True,
      "titulo": "Índice de Riesgo de Desastres",
      "descripcion": "Frecuencia y severidad de las emergencias en los 25 departamentos, "
@@ -137,6 +138,36 @@ SECCIONES = [
                     "al Perú con sus vecinos.",
      "etiquetas": ["Países", "Comparación regional"]},
 ]
+
+# ---- Índices climáticos mensuales (archivo ICEM.xlsx) -------------------------
+ARCHIVO_CLIMA = os.path.join(CARPETA, "ICEM.xlsx")
+HOJA_CLIMA = 0                       # 0 = primera hoja del Excel
+COL_CLIMA_ANIO, COL_CLIMA_MES = "yyyy", "mm"
+RUTA_CLIMA = "/indices-mensuales"
+MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto",
+         "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+COLORES_CALIDOS = ["#f03b20", "#fd8d3c", "#fecc5c", "#ffffb2"]   # de más fuerte a más débil
+COLORES_FRIOS = ["#bdd7e7", "#6baed6", "#3182bd"]                # de más débil a más fuerte
+COLOR_NEUTRO = "#ffffff"
+# Cada índice: columna del Excel, nombre, decimales y criterio (tus tablas de "CRITERIO").
+#   calidas: (magnitud, umbral) de la más fuerte a la más débil -> cálida si valor > umbral
+#   frias:   (magnitud, umbral) de la más débil a la más fuerte -> fría si valor < umbral
+#   incluye_limite=True cuando el criterio usa ≥ y ≤ (como el MEI v2)
+INDICES_CLIMA = {
+    "LABCOS": {"columna": "LABCOS", "nombre": "Índice LABCOS", "decimales": 1, "decimales_criterio": 2,
+               "calidas": [("Muy fuerte", 2.77), ("Fuerte", 1.37), ("Moderada", 0.78), ("Débil", 0.27)],
+               "frias": [("Débil", -0.78), ("Moderada", -1.10), ("Fuerte", -1.31)]},
+    "ITCP": {"columna": "ITCP", "nombre": "Índice Térmico Costero Peruano", "decimales": 1,
+             "calidas": [("Cálida", 0.4)], "frias": [("Fría", -0.6)]},
+    "ICEN": {"columna": "ICE", "nombre": "Índice Costero El Niño", "decimales": 2,
+             "calidas": [("Extraordinaria", 3.5), ("Fuerte", 2.1), ("Moderada", 1.3), ("Débil", 0.5)],
+             "frias": [("Débil", -0.7), ("Moderada", -1.1), ("Fuerte", -1.3)]},
+    # EHNOS: se usa el criterio del MEI v2 (±0,5). Si su criterio es otro, cámbialo aquí.
+    "EHNOS": {"columna": "EHNOS", "nombre": "Índice EHNOS", "decimales": 2,
+              "calidas": [("Cálida", 0.5)], "frias": [("Fría", -0.5)], "incluye_limite": True},
+}
+COLOR_CALIDO, COLOR_FRIO, COLOR_NEUTRO_GRIS = "#f03b20", "#3182bd", "#c9d6e3"
+MESES_VENTANA = 36       # meses que muestran "Variación a 12 meses" y "¿Coinciden los índices?"
 
 
 # =============================================================================
@@ -343,6 +374,91 @@ def centroides(geojson, clave="NOMBDEP"):
                 mejor, mejor_area = (float(cx), float(cy)), abs(area)
         resultado[feature["properties"][clave]] = mejor
     return resultado
+
+
+# ---- Datos de los índices climáticos ------------------------------------------
+def a_numero(serie):
+    """'4.7*' -> 4.7 ; '0,35' -> 0.35 ; vacío -> NaN"""
+    texto = serie.astype(str).str.strip().str.replace("*", "", regex=False).str.replace(",", ".", regex=False)
+    return pd.to_numeric(texto, errors="coerce") + 0.0   # + 0.0 convierte -0.0 en 0.0
+
+
+def cargar_clima():
+    """Una fila por mes. Si el Excel no está, devuelve None (la página queda «En preparación»)."""
+    if not os.path.exists(ARCHIVO_CLIMA):
+        return None
+    df = pd.read_excel(ARCHIVO_CLIMA, sheet_name=HOJA_CLIMA)
+    df.columns = df.columns.astype(str).str.strip()
+    df = df.rename(columns={COL_CLIMA_ANIO: "anio", COL_CLIMA_MES: "mes"})
+    df["anio"] = pd.to_numeric(df["anio"], errors="coerce")
+    df["mes"] = pd.to_numeric(df["mes"], errors="coerce")
+    df = df.dropna(subset=["anio", "mes"]).astype({"anio": int, "mes": int})
+    for clave, cfg in INDICES_CLIMA.items():
+        original = df[cfg["columna"]]
+        df[clave] = a_numero(original)
+        df[clave + "_prelim"] = original.astype(str).str.contains(r"\*", regex=True)
+    df["fecha"] = pd.to_datetime(dict(year=df["anio"], month=df["mes"], day=1))
+    df = df.sort_values("fecha").reset_index(drop=True)
+    df["etiqueta"] = [f"{MESES[m - 1][:3]} {a}" for a, m in zip(df["anio"], df["mes"])]
+    return df
+
+
+def segmentos_clima(cfg):
+    """Categorías de izquierda (más cálida) a derecha (más fría), con su color y su rango."""
+    calidas, frias = cfg["calidas"], cfg["frias"]
+    varias = len(calidas) > 1
+    neutro = dict(grupo="Neutro", magnitud="Neutro", color=COLOR_NEUTRO,
+                  desde=frias[0][1], hasta=calidas[-1][1])
+    extra_c = calidas[0][1] - calidas[1][1] if varias else neutro["hasta"] - neutro["desde"]
+    extra_f = frias[-2][1] - frias[-1][1] if len(frias) > 1 else neutro["hasta"] - neutro["desde"]
+    segmentos = []
+    for i, (magnitud, umbral) in enumerate(calidas):
+        hasta = calidas[i - 1][1] if i else umbral + extra_c
+        segmentos.append(dict(grupo="Condición cálida", magnitud=magnitud, color=COLORES_CALIDOS[i],
+                              desde=umbral, hasta=hasta, abierto=(i == 0)))
+    segmentos.append(dict(neutro, abierto=False))
+    colores_frios = COLORES_FRIOS[-len(frias):]
+    for j, (magnitud, umbral) in enumerate(frias):
+        desde = frias[j + 1][1] if j + 1 < len(frias) else umbral - extra_f
+        segmentos.append(dict(grupo="Condición fría", magnitud=magnitud, color=colores_frios[j],
+                              desde=desde, hasta=umbral, abierto=(j == len(frias) - 1)))
+    for seg in segmentos:
+        seg["texto"] = seg["grupo"] if not varias or seg["grupo"] == "Neutro" else f"{seg['grupo']} {seg['magnitud'].lower()}"
+    return segmentos
+
+
+def clasificar_clima(valor, cfg):
+    """Posición (0 = más cálida) de la categoría del valor, o None si no hay dato."""
+    if es_vacio(valor):
+        return None
+    incluye = cfg.get("incluye_limite", False)
+    for i, (_, umbral) in enumerate(cfg["calidas"]):
+        if valor > umbral or (incluye and valor == umbral):
+            return i
+    n_calidas = len(cfg["calidas"])
+    for j in range(len(cfg["frias"]) - 1, -1, -1):  # de la más fuerte a la más débil
+        umbral = cfg["frias"][j][1]
+        if valor < umbral or (incluye and valor == umbral):
+            return n_calidas + 1 + j
+    return n_calidas  # neutro
+
+
+def valor_clima(valor, decimales):
+    return "—" if es_vacio(valor) else numero(round(float(valor), decimales) + 0.0, decimales)
+
+
+def umbral_texto(valor, decimales=1):
+    texto = f"{valor:+.{decimales}f}".replace(".", SEPARADOR_DECIMAL)
+    return texto.replace("-", "−")
+
+
+def intervalo_texto(seg, cfg):
+    incluye, dec = cfg.get("incluye_limite", False), cfg.get("decimales_criterio", 1)
+    if seg["grupo"] == "Condición cálida" and seg["abierto"]:
+        return f"{'≥' if incluye else '>'} {umbral_texto(seg['desde'], dec)}"
+    if seg["grupo"] == "Condición fría" and seg["abierto"]:
+        return f"{'≤' if incluye else '<'} {umbral_texto(seg['hasta'], dec)}"
+    return f"{umbral_texto(seg['desde'], dec)} a {umbral_texto(seg['hasta'], dec)}"
 
 
 # =============================================================================
@@ -755,6 +871,347 @@ def grafico_composicion(serie, anio):
     return fig
 
 
+# ---- 4.11 Velocímetro de un índice climático (como el de tus reportes) -------
+def grafico_velocimetro_clima(cfg, valor):
+    segs = segmentos_clima(cfg)
+    n, r_in = len(segs), 0.36
+    paso = 180 / n
+    fig = go.Figure()
+
+    def arco(a1, a2, radio, puntos=24):
+        ang = np.radians(np.linspace(a1, a2, puntos))
+        return list(radio * np.cos(ang)), list(radio * np.sin(ang))
+
+    for k, seg in enumerate(segs):  # sectores de igual tamaño, cálido a la izquierda
+        a1, a2 = 180 - k * paso, 180 - (k + 1) * paso
+        xo, yo = arco(a1, a2, 1)
+        xi, yi = arco(a2, a1, r_in)
+        fig.add_scatter(x=xo + xi + [xo[0]], y=yo + yi + [yo[0]], fill="toself", mode="lines",
+                        fillcolor=seg["color"], line=dict(color="#4d4d4d", width=0.8), hoverinfo="skip")
+        medio = np.radians((a1 + a2) / 2)
+        etiqueta = "NEUTRO" if seg["grupo"] == "Neutro" else seg["magnitud"].upper()
+        etiqueta = {"MUY FUERTE": "MUY<br>FUERTE", "EXTRAORDINARIA": "EXTRA-<br>ORDINARIA"}.get(etiqueta, etiqueta)
+        fig.add_annotation(x=1.12 * np.cos(medio), y=1.12 * np.sin(medio), text=etiqueta, showarrow=False,
+                           textangle=90 - (a1 + a2) / 2, font=dict(size=8, color=C["tinta"]))
+    xh, yh = arco(180, 0, r_in)  # centro blanco
+    fig.add_scatter(x=xh, y=yh, fill="toself", mode="lines", fillcolor="#ffffff",
+                    line=dict(color="#4d4d4d", width=0.8), hoverinfo="skip")
+    fig.add_shape(type="line", x0=-1, x1=1, y0=0, y1=0, line=dict(color="#4d4d4d", width=1))
+
+    k = clasificar_clima(valor, cfg)
+    if k is not None:  # aguja: dentro del sector de su categoría
+        seg = segs[k]
+        fraccion = (seg["hasta"] - float(valor)) / (seg["hasta"] - seg["desde"])
+        fraccion = min(max(fraccion, 0.06), 0.94)
+        angulo = np.radians(180 - (k + fraccion) * paso)
+        largo = r_in * 0.86
+        fig.add_annotation(x=largo * np.cos(angulo), y=largo * np.sin(angulo), ax=0, ay=0,
+                           xref="x", yref="y", axref="x", ayref="y", text="", showarrow=True,
+                           arrowhead=2, arrowsize=1, arrowwidth=2.6, arrowcolor="#111111")
+        fig.add_scatter(x=[0], y=[0], mode="markers", hoverinfo="skip",
+                        marker=dict(size=9, color="#111111"))
+    fig.add_annotation(x=-1, y=-0.02, text="<b>CÁLIDA</b>", showarrow=False, xanchor="left", yanchor="top",
+                       font=dict(size=9.5, color=C["tinta"]))
+    fig.add_annotation(x=1, y=-0.02, text="<b>FRÍA</b>", showarrow=False, xanchor="right", yanchor="top",
+                       font=dict(size=9.5, color=C["tinta"]))
+    fig.update_layout(showlegend=False, margin=dict(l=2, r=2, t=2, b=2),
+                      xaxis=dict(visible=False, range=[-1.24, 1.24], fixedrange=True),
+                      yaxis=dict(visible=False, range=[-0.17, 1.27], fixedrange=True,
+                                 scaleanchor="x", scaleratio=1))
+    return fig
+
+
+# ---- Ayudas para los gráficos climáticos --------------------------------------
+def limites_neutro(cfg):
+    return cfg["frias"][0][1], cfg["calidas"][-1][1]
+
+
+def grupo_clima(valor, cfg):
+    k = clasificar_clima(valor, cfg)
+    return None if k is None else segmentos_clima(cfg)[k]["grupo"]
+
+
+def ticks_semestrales(etiquetas, meses):
+    """Etiquetas del eje solo en enero y julio (para ejes por categoría)."""
+    return [e for e, m in zip(etiquetas, meses) if m in (1, 7)]
+
+
+def picos(serie, ventana, umbral, maximos=True, cuantos=3):
+    """Meses que son el pico de su episodio (máximo o mínimo en ±ventana meses)."""
+    s = serie if maximos else -serie
+    techo = s.rolling(2 * ventana + 1, center=True, min_periods=1).max()
+    candidatos = s[(s == techo) & (s > (umbral if maximos else -umbral))].sort_values(ascending=False)
+    elegidos = []
+    for i in candidatos.index:  # un solo pico por episodio (evita empates vecinos)
+        if all(abs(i - j) > ventana for j in elegidos):
+            elegidos.append(i)
+    return elegidos[:cuantos]
+
+
+# ---- 4.12 Evolución: relleno rojo arriba de cero y azul abajo -----------------
+def grafico_evolucion_clima(clima, clave, idx):
+    cfg = INDICES_CLIMA[clave]
+    dec = cfg["decimales"]
+    lim_frio, lim_calido = limites_neutro(cfg)
+    datos = clima[["fecha", "etiqueta", clave, clave + "_prelim"]].dropna(subset=[clave])
+    t = datos["fecha"].to_numpy(dtype="datetime64[ns]").astype("int64")
+    v = datos[clave].to_numpy(dtype=float)
+    xs, ys = [], []
+    for i in range(len(v)):  # se agrega el punto donde la curva cruza el cero
+        if i and v[i - 1] * v[i] < 0:
+            f = v[i - 1] / (v[i - 1] - v[i])
+            xs.append(t[i - 1] + f * (t[i] - t[i - 1]))
+            ys.append(0.0)
+        xs.append(t[i])
+        ys.append(v[i])
+    xs = pd.to_datetime(np.array(xs).astype("int64"))
+    ys = np.array(ys)
+    fig = go.Figure()
+    fig.add_scatter(x=xs, y=np.maximum(ys, 0), mode="lines", fill="tozeroy", line=dict(width=0),
+                    fillcolor=hex_a_rgba(COLOR_CALIDO, 0.62), hoverinfo="skip", showlegend=False)
+    fig.add_scatter(x=xs, y=np.minimum(ys, 0), mode="lines", fill="tozeroy", line=dict(width=0),
+                    fillcolor=hex_a_rgba(COLOR_FRIO, 0.62), hoverinfo="skip", showlegend=False)
+    segs = segmentos_clima(cfg)
+    custom = [[e, valor_clima(x, dec), segs[clasificar_clima(x, cfg)]["texto"], " (preliminar)" if p else ""]
+              for e, x, p in zip(datos["etiqueta"], v, datos[clave + "_prelim"])]
+    fig.add_scatter(x=datos["fecha"], y=v, mode="lines", line=dict(color=C["tinta"], width=1.4),
+                    customdata=custom, showlegend=False,
+                    hovertemplate="<b>%{customdata[0]}</b>: %{customdata[1]}%{customdata[3]}"
+                                  "<br>%{customdata[2]}<extra></extra>")
+    for y, texto, color, ancla in [(lim_calido, f"Umbral cálido {umbral_texto(lim_calido, cfg.get('decimales_criterio', 1))}",
+                                    COLOR_CALIDO, "bottom"),
+                                   (lim_frio, f"Umbral frío {umbral_texto(lim_frio, cfg.get('decimales_criterio', 1))}",
+                                    COLOR_FRIO, "top")]:
+        fig.add_hline(y=y, line=dict(color=color, width=1.2, dash="dash"), layer="below")
+        fig.add_annotation(x=0, xref="paper", y=y, text=texto, showarrow=False, xanchor="left", yanchor=ancla,
+                           font=dict(size=10.5, color=color), bgcolor=hex_a_rgba(C["superficie"], 0.8))
+    fig.add_hline(y=0, line=dict(color=C["tinta_3"], width=1), layer="below")
+
+    serie = datos[clave]
+    for i in picos(serie, 9, lim_calido, True, 3) + picos(serie, 9, lim_frio, False, 2):
+        if i == idx:
+            continue
+        arriba = serie[i] > 0
+        fig.add_annotation(x=datos.loc[i, "fecha"], y=serie[i], ax=0, ay=-26 if arriba else 26,
+                           text=f"{valor_clima(serie[i], dec)} · {datos.loc[i, 'etiqueta']}", showarrow=True,
+                           arrowhead=0, arrowwidth=1, arrowcolor=C["tinta_3"],
+                           font=dict(size=10, color=C["tinta_2"]), bgcolor=hex_a_rgba(C["superficie"], 0.8))
+    fila = clima.loc[idx]
+    if not es_vacio(fila[clave]):
+        fig.add_scatter(x=[fila["fecha"]], y=[fila[clave]], mode="markers", hoverinfo="skip", showlegend=False,
+                        marker=dict(size=14, color=C["superficie"], line=dict(color=C["tinta"], width=3)))
+        fig.add_annotation(x=fila["fecha"], y=fila[clave], ax=0, ay=-34 if fila[clave] >= 0 else 34,
+                           text=f"<b>{valor_clima(fila[clave], dec)} · {fila['etiqueta']}</b>", showarrow=True,
+                           arrowhead=0, arrowwidth=1.4, arrowcolor=C["tinta"],
+                           font=dict(size=12, color=C["superficie"]), bgcolor=C["tinta"], borderpad=4)
+    fig.add_vline(x=fila["fecha"], line=dict(color=C["pacifico_medio"], width=1, dash="dot"), layer="below")
+    bajo, alto = min(np.nanmin(v), lim_frio), max(np.nanmax(v), lim_calido)
+    pad = (alto - bajo) * 0.1
+    fig.update_layout(
+        hovermode="closest", margin=dict(l=4, r=4, t=36, b=4),
+        yaxis=dict(title=clave, range=[bajo - pad, alto + pad * 1.8], zeroline=False),
+        xaxis=dict(showgrid=False, tickformat="%Y", dtick="M24", rangeselector=dict(
+            x=0, y=1.02, yanchor="bottom", bgcolor=C["niebla"], activecolor=C["azul_suave"],
+            font=dict(size=11, color=C["tinta"]),
+            buttons=[dict(count=2, label="2 años", step="year", stepmode="backward"),
+                     dict(count=5, label="5 años", step="year", stepmode="backward"),
+                     dict(step="all", label="Todo")])))
+    return fig
+
+
+# ---- 4.13 Variación a 12 meses (barras divergentes) --------------------------
+def variacion_12(clima, clave):
+    return clima[clave] - clima[clave].shift(12)
+
+
+def grafico_variacion12_clima(clima, clave, idx):
+    if idx < 12:
+        return figura_vacia("Se necesitan 12 meses previos para calcular la variación.")
+    dec = INDICES_CLIMA[clave]["decimales"]
+    cambio = variacion_12(clima, clave)
+    tramo = clima.loc[max(12, idx - MESES_VENTANA + 1):idx]
+    y = cambio.loc[tramo.index]
+    custom = [[e, valor_clima(clima.loc[i, clave], dec), clima.loc[i - 12, "etiqueta"],
+               valor_clima(clima.loc[i - 12, clave], dec), con_signo(round(c, dec) + 0.0, dec) if not es_vacio(c) else "—"]
+              for i, e, c in zip(tramo.index, tramo["etiqueta"], y)]
+    colores = [C["contexto"] if es_vacio(c) else (COLOR_CALIDO if c > 0 else COLOR_FRIO) for c in y]
+    fig = go.Figure(go.Bar(
+        x=tramo["etiqueta"], y=y, marker=dict(color=colores, opacity=[1 if i == idx else 0.5 for i in tramo.index]),
+        text=[f"<b>{con_signo(round(c, dec) + 0.0, dec)}</b>" if i == idx and not es_vacio(c) else ""
+              for i, c in zip(tramo.index, y)],
+        textposition="outside", cliponaxis=False, constraintext="none", textfont=dict(size=12, color=C["tinta"]),
+        customdata=custom,
+        hovertemplate="<b>%{customdata[0]}</b>: %{customdata[1]}<br>%{customdata[2]}: %{customdata[3]}"
+                      "<br>Cambio: <b>%{customdata[4]}</b><extra></extra>"))
+    fig.add_hline(y=0, line=dict(color=C["tinta_3"], width=1))
+    tope = np.nanmax(np.abs(y.to_numpy(dtype=float))) if y.notna().any() else 1
+    fig.update_layout(margin=dict(l=4, r=26, t=22, b=4), bargap=0.25, showlegend=False,
+                      xaxis=dict(type="category", tickvals=ticks_semestrales(tramo["etiqueta"], tramo["mes"]),
+                                 showline=False),
+                      yaxis=dict(title="Cambio vs. mismo mes del año anterior", range=[-tope * 1.25, tope * 1.25],
+                                 zeroline=False))
+    return fig
+
+
+# ---- 4.14 Hace un año vs. hoy (los cuatro índices) ---------------------------
+def grafico_anio_vs_hoy(clima, idx):
+    if idx < 12:
+        return figura_vacia("Se necesitan 12 meses previos para comparar.")
+    hoy, antes = clima.loc[idx], clima.loc[idx - 12]
+    claves = list(INDICES_CLIMA)[::-1]  # el primero queda arriba
+    fig = go.Figure()
+    for k in claves:
+        cfg = INDICES_CLIMA[k]
+        x0, x1 = antes[k], hoy[k]
+        if es_vacio(x0) or es_vacio(x1):
+            continue
+        sube = x1 > x0
+        fig.add_annotation(x=x1, y=k, ax=x0, ay=k, xref="x", yref="y", axref="x", ayref="y", text="",
+                           showarrow=True, arrowhead=2, arrowsize=1.1, arrowwidth=3, standoff=11,
+                           arrowcolor=hex_a_rgba(COLOR_CALIDO if sube else COLOR_FRIO, 0.75))
+        seg = segmentos_clima(cfg)[clasificar_clima(x1, cfg)]
+        fig.add_scatter(x=[x0], y=[k], mode="markers+text", text=[valor_clima(x0, cfg["decimales"])],
+                        textposition="bottom center", textfont=dict(size=11, color=C["tinta_3"]),
+                        marker=dict(size=14, color=C["superficie"], line=dict(color=C["tinta_3"], width=2)),
+                        showlegend=False, hovertemplate=f"<b>{k}</b> {antes['etiqueta']}: %{{x:.2f}}<extra></extra>")
+        fig.add_scatter(x=[x1], y=[k], mode="markers+text", text=[f"<b>{valor_clima(x1, cfg['decimales'])}</b>"],
+                        textposition="top center", textfont=dict(size=13, color=C["tinta"]),
+                        marker=dict(size=20, color=seg["color"], line=dict(color=C["tinta"], width=1.5)),
+                        showlegend=False,
+                        hovertemplate=f"<b>{k}</b> {hoy['etiqueta']}: %{{x:.2f}}<br>{seg['texto']}<extra></extra>")
+    fig.add_vline(x=0, line=dict(color=C["tinta_3"], width=1, dash="dot"), layer="below")
+    fig.add_scatter(x=[None], y=[None], mode="markers", name=antes["etiqueta"],
+                    marker=dict(size=12, color=C["superficie"], line=dict(color=C["tinta_3"], width=2)))
+    fig.add_scatter(x=[None], y=[None], mode="markers", name=f"{hoy['etiqueta']} (color de su categoría)",
+                    marker=dict(size=12, color=COLOR_CALIDO, line=dict(color=C["tinta"], width=1.5)))
+    fig.update_layout(margin=dict(l=4, r=12, t=36, b=4), legend=dict(y=1.04),
+                      xaxis=dict(title="Valor del índice", showgrid=True, gridcolor=C["rejilla"], zeroline=False),
+                      yaxis=dict(type="category", categoryorder="array", categoryarray=claves, showgrid=False,
+                                 tickfont=dict(size=13, color=C["tinta"])))
+    return fig
+
+
+# ---- 4.15 Cada año, mes a mes (estacionalidad) -------------------------------
+def grafico_estacional_clima(clima, clave, idx):
+    cfg = INDICES_CLIMA[clave]
+    dec = cfg["decimales"]
+    lim_frio, lim_calido = limites_neutro(cfg)
+    anio_sel = int(clima.loc[idx, "anio"])
+    tabla = clima.pivot_table(index="anio", columns="mes", values=clave, aggfunc="first").reindex(columns=range(1, 13))
+    anio_max = int(tabla.max(axis=1).idxmax())
+    fig = go.Figure()
+    fig.add_hrect(y0=lim_frio, y1=lim_calido, fillcolor=C["niebla"], opacity=1, line_width=0, layer="below")
+    fig.add_annotation(x=12.4, y=(lim_frio + lim_calido) / 2, text="Neutro", showarrow=False, xanchor="left",
+                       font=dict(size=10, color=C["tinta_3"]))
+
+    def linea(anio, color, ancho, marcadores=False, opacidad=1.0):
+        fila = tabla.loc[anio]
+        custom = [[anio, MESES[m - 1], valor_clima(x, dec)] for m, x in fila.items()]
+        fig.add_scatter(x=list(range(1, 13)), y=fila.values, mode="lines+markers" if marcadores else "lines",
+                        line=dict(color=color, width=ancho, shape="spline", smoothing=0.5), opacity=opacidad,
+                        marker=dict(size=7, color=color), customdata=custom, showlegend=False,
+                        hovertemplate="<b>%{customdata[1]} %{customdata[0]}</b>: %{customdata[2]}<extra></extra>")
+        validos = fila.dropna()
+        if marcadores or anio == anio_max:
+            fig.add_annotation(x=validos.index[-1], y=validos.iloc[-1], text=f"<b>{anio}</b>", showarrow=False,
+                               xanchor="left", xshift=8, font=dict(size=12, color=color))
+
+    for anio in tabla.index:
+        if anio not in (anio_sel, anio_max):
+            linea(anio, "#b9c9d9", 1.2, opacidad=0.8)
+    if anio_max != anio_sel:
+        linea(anio_max, COLOR_CALIDO, 2.4)
+    linea(anio_sel, C["tinta"], 3.4, marcadores=True)
+    valor = clima.loc[idx, clave]
+    if not es_vacio(valor):
+        fig.add_scatter(x=[clima.loc[idx, "mes"]], y=[valor], mode="markers", hoverinfo="skip", showlegend=False,
+                        marker=dict(size=16, color="rgba(0,0,0,0)", line=dict(color=C["pacifico_medio"], width=3)))
+    fig.update_layout(hovermode="closest", margin=dict(l=4, r=40, t=8, b=4),
+                      xaxis=dict(tickvals=list(range(1, 13)), ticktext=[m[:3] for m in MESES], range=[0.7, 13.2],
+                                 showgrid=False),
+                      yaxis=dict(title=clave, zeroline=True, zerolinecolor=C["contexto"]))
+    return fig
+
+
+# ---- 4.16 Los 10 meses más cálidos -------------------------------------------
+def grafico_top_clima(clima, clave, idx):
+    cfg = INDICES_CLIMA[clave]
+    segs, dec = segmentos_clima(cfg), cfg["decimales"]
+    top = clima[["etiqueta", clave]].dropna().nlargest(10, clave).iloc[::-1]
+    sel = clima.loc[idx, "etiqueta"]
+    colores = [segs[clasificar_clima(x, cfg)]["color"] for x in top[clave]]
+    fig = go.Figure(go.Bar(
+        y=top["etiqueta"], x=top[clave], orientation="h",
+        marker=dict(color=colores, line=dict(color=[C["tinta"] if e == sel else BORDE_MAPA for e in top["etiqueta"]],
+                                             width=[3 if e == sel else 0.6 for e in top["etiqueta"]])),
+        text=[valor_clima(x, dec) for x in top[clave]], textposition="outside", cliponaxis=False,
+        textfont=dict(size=11, color=C["tinta"]),
+        customdata=[segs[clasificar_clima(x, cfg)]["texto"] for x in top[clave]],
+        hovertemplate="<b>%{y}</b>: %{x:.2f}<br>%{customdata}<extra></extra>"))
+    fig.update_layout(margin=dict(l=4, r=4, t=8, b=4), bargap=0.2, showlegend=False,
+                      xaxis=dict(visible=False, range=[0, top[clave].max() * 1.15]),
+                      yaxis=dict(type="category", tickvals=list(top["etiqueta"]),
+                                 ticktext=[f"<b>{e}</b>" if e == sel else e for e in top["etiqueta"]],
+                                 tickfont=dict(size=11, color=C["tinta"]), showline=True, linecolor=C["borde"]))
+    return fig
+
+
+# ---- 4.17 ¿Coinciden los cuatro índices? (barras apiladas) -------------------
+def grafico_consenso_clima(clima, idx):
+    tramo = clima.loc[max(0, idx - MESES_VENTANA + 1):idx]
+    conteo = {"Condición cálida": [], "Neutro": [], "Condición fría": []}
+    for _, fila in tramo.iterrows():
+        grupos = [grupo_clima(fila[k], cfg) for k, cfg in INDICES_CLIMA.items()]
+        for g in conteo:
+            conteo[g].append(grupos.count(g))
+    fig = go.Figure()
+    for g, color, nombre in [("Condición cálida", COLOR_CALIDO, "Cálida"), ("Neutro", COLOR_NEUTRO_GRIS, "Neutro"),
+                             ("Condición fría", COLOR_FRIO, "Fría")]:
+        fig.add_bar(x=tramo["etiqueta"], y=conteo[g], name=nombre, marker=dict(color=color, line=dict(width=0)),
+                    hovertemplate=f"%{{x}}: %{{y}} índice(s) en condición {nombre.lower()}<extra></extra>")
+    pos = list(tramo.index).index(idx)
+    fig.add_shape(type="rect", x0=pos - 0.5, x1=pos + 0.5, y0=0, y1=len(INDICES_CLIMA), xref="x", yref="y",
+                  line=dict(color=C["tinta"], width=2.5), fillcolor="rgba(0,0,0,0)")
+    fig.update_layout(barmode="stack", bargap=0.12, margin=dict(l=4, r=4, t=36, b=4),
+                      legend=dict(y=1.04, traceorder="normal"),
+                      xaxis=dict(type="category", tickvals=ticks_semestrales(tramo["etiqueta"], tramo["mes"]),
+                                 showline=False),
+                      yaxis=dict(title="Número de índices", range=[0, len(INDICES_CLIMA)], dtick=1))
+    return fig
+
+
+# ---- 4.18 Calendario: año x mes en colores del criterio ----------------------
+def grafico_calendario_clima(clima, clave, idx):
+    cfg = INDICES_CLIMA[clave]
+    segs, dec = segmentos_clima(cfg), cfg["decimales"]
+    anios = sorted(clima["anio"].unique(), reverse=True)
+    tabla = clima.pivot_table(index="anio", columns="mes", values=clave, aggfunc="first")
+    tabla = tabla.reindex(index=anios, columns=range(1, 13))
+    z = [[clasificar_clima(v, cfg) for v in fila] for fila in tabla.to_numpy()]
+    texto = [[valor_clima(v, 1) if not es_vacio(v) else "" for v in fila] for fila in tabla.to_numpy()]
+    custom = [[[f"{MESES[m - 1]} {a}", valor_clima(v, dec),
+                segs[c]["texto"] if c is not None else "Sin dato"]
+               for m, v, c in zip(range(1, 13), fila, zfila)]
+              for a, fila, zfila in zip(anios, tabla.to_numpy(), z)]
+    n = len(segs)
+    escala = []
+    for i, seg in enumerate(segs):
+        escala += [[i / n, seg["color"]], [(i + 1) / n, seg["color"]]]
+    fig = go.Figure(go.Heatmap(
+        z=z, x=list(range(1, 13)), y=anios, text=texto, texttemplate="%{text}",
+        textfont=dict(size=10), customdata=custom, colorscale=escala, zmin=-0.5, zmax=n - 0.5,
+        showscale=False, xgap=2, ygap=2, hoverongaps=False,
+        hovertemplate="<b>%{customdata[0]}</b>: %{customdata[1]}<br>%{customdata[2]}<extra></extra>"))
+    fila = clima.loc[idx]
+    fig.add_shape(type="rect", x0=fila["mes"] - 0.5, x1=fila["mes"] + 0.5, y0=fila["anio"] - 0.5,
+                  y1=fila["anio"] + 0.5, line=dict(color=C["tinta"], width=2.5), fillcolor="rgba(0,0,0,0)")
+    fig.update_layout(margin=dict(l=4, r=4, t=4, b=4), plot_bgcolor=C["niebla"],
+                      xaxis=dict(tickvals=list(range(1, 13)), ticktext=[m[:3] for m in MESES], side="top",
+                                 showline=False, tickfont=dict(size=11)),
+                      yaxis=dict(tickvals=anios, autorange="reversed", showgrid=False, tickfont=dict(size=11)))
+    return fig
+
+
 # =============================================================================
 # 5. DISEÑO  (íconos, piezas de la página y estilos CSS)
 # =============================================================================
@@ -945,6 +1402,120 @@ def crear_layout(base):
     return html.Div(className="app", children=[barra_lateral(departamentos, anios), contenido])
 
 
+# ---- Página de índices climáticos ---------------------------------------------
+def barra_lateral_clima(clima):
+    n = len(clima)
+    marcas = {i: str(a) for i, (a, m) in enumerate(zip(clima["anio"], clima["mes"]))
+              if m == 1 and (a - clima["anio"].iloc[0]) % 4 == 0 and i < n - 30}
+    marcas[n - 1] = clima["etiqueta"].iloc[-1]
+    return html.Aside(className="lateral", children=[
+        dcc.Link([icono("volver"), "Portada"], href="/", className="lateral-volver"),
+        html.Div(className="marca", children=[html.Span("ICM", className="marca-sigla"),
+                                              html.Span("Índices climáticos mensuales", className="marca-nombre")]),
+        html.Div(className="seleccion", children=[html.Div(id="clima-lateral-anio", className="seleccion-anio"),
+                                                  html.Div(id="clima-lateral-mes", className="seleccion-dpto")]),
+        html.Div(className="controles", children=[
+            html.Label([icono("indicador"), "Índice"], className="control-etiqueta"),
+            dcc.RadioItems(id="clima-indice", value=list(INDICES_CLIMA)[0], className="control-radio",
+                           options=[{"label": k, "value": k} for k in INDICES_CLIMA]),
+            html.Div(className="control-fila", children=[
+                html.Label([icono("calendario"), "Mes"], className="control-etiqueta"),
+                html.Button("▶ Reproducir", id="clima-btn-play", n_clicks=0, className="boton-play")]),
+            dcc.Slider(id="clima-mes", min=0, max=n - 1, step=1, value=n - 1, marks=marcas, included=False),
+            html.Button(f"Ir al último mes ({clima['etiqueta'].iloc[-1]})", id="clima-btn-ultimo",
+                        n_clicks=0, className="boton-secundario")]),
+        html.P("Consejo: haz clic en una tarjeta para ver ese índice, o en el calendario para elegir un mes.",
+               className="lateral-nota"),
+        dcc.Interval(id="clima-intervalo", interval=700, disabled=True, n_intervals=0),
+    ])
+
+
+def tarjeta_clima(clave):
+    cfg = INDICES_CLIMA[clave]
+    return html.Div(id=f"clima-tarjeta-{clave}", n_clicks=0, className="clima-tarjeta", children=[
+        html.Div(className="clima-tarjeta-cabeza", children=[
+            html.Span(icono("ola"), className="kpi-icono"),
+            html.Div([html.Span(clave, className="clima-sigla"),
+                      html.Span(cfg["nombre"], className="clima-nombre")])]),
+        dcc.Graph(id=f"clima-graf-{clave}", config={"displayModeBar": False, "staticPlot": True},
+                  style={"height": "170px"}),
+        html.P(id=f"clima-valor-{clave}", className="clima-valor"),
+        html.Div(id=f"clima-estado-{clave}", className="clima-estado"),
+        html.Div(id=f"clima-delta-{clave}", className="kpi-delta clima-delta"),
+    ])
+
+
+def tabla_criterio(clave):
+    cfg = INDICES_CLIMA[clave]
+    segs = segmentos_clima(cfg)
+    varias = len(cfg["calidas"]) > 1
+    cabecera = html.Thead(html.Tr([html.Th("Categoría"), html.Th("Magnitud" if varias else ""),
+                                   html.Th("Intervalo")]))
+    filas, anterior = [], None
+    for seg in segs:
+        grupo = seg["grupo"]
+        filas.append(html.Tr([
+            html.Td(grupo if grupo != anterior else "", className="criterio-grupo"),
+            html.Td([html.Span(className="criterio-color", style={"background": seg["color"]}),
+                     "" if grupo == "Neutro" or not varias else seg["magnitud"]]),
+            html.Td(intervalo_texto(seg, cfg), className="num")]))
+        anterior = grupo
+    return html.Table(className="criterio", children=[cabecera, html.Tbody(filas)])
+
+
+def crear_layout_clima(clima):
+    primero, ultimo = clima["etiqueta"].iloc[0], clima["etiqueta"].iloc[-1]
+    cabecera = html.Header(className="cabecera", children=[
+        html.H1(id="clima-titulo"),
+        html.P(f"Condición del mar según cuatro índices mensuales, {primero} – {ultimo}",
+               className="cabecera-sub")])
+    criterio = html.Section(className="panel area-criterio", children=[
+        html.Header(className="panel-cabecera", children=[
+            html.Div([html.Span(icono("ranking"), className="panel-icono"),
+                      html.H3(id="clima-criterio-titulo")], className="panel-titulo"),
+            html.P("Rangos con los que se clasifica cada mes.", className="panel-descripcion")]),
+        html.Div(id="clima-criterio", className="criterio-contenedor")])
+    fila_evolucion = html.Div(className="fila fila-historia", children=[
+        panel("clima-graf-evolucion", "Evolución del índice",
+              "Rojo: por encima de cero (más cálido de lo normal). Azul: por debajo. Las líneas punteadas son "
+              "los umbrales del criterio. Clic en la línea para elegir un mes.",
+              area="evolucion", alto=440, icono_panel="tendencia"),
+        criterio])
+    fila_variacion = html.Div(className="fila fila-2", children=[
+        panel("clima-graf-variacion", "Variación a 12 meses",
+              "Diferencia entre cada mes y el mismo mes del año anterior. Rojo: se calentó; azul: se enfrió.",
+              area="variacion12", alto=400, icono_panel="subebaja"),
+        panel("clima-graf-anio", "Hace un año vs. hoy",
+              "Valor de cada índice hace 12 meses (gris) y ahora (color de su categoría). "
+              "Clic en un índice para elegirlo.",
+              area="anio", alto=400, icono_panel="flecha")])
+    fila_estacional = html.Div(className="fila fila-2", children=[
+        panel("clima-graf-estacional", "Cada año, mes a mes",
+              "Cada línea es un año, de enero a diciembre. Resaltados: el año elegido (azul) y el año con el "
+              "valor más alto (rojo). La franja gris es el rango neutro.",
+              area="estacional", alto=440, icono_panel="ola"),
+        panel("clima-graf-top", "Los 10 meses más cálidos",
+              "Meses con el valor más alto desde 2010, con el color de su categoría. "
+              "El mes elegido va con borde oscuro.",
+              area="top", alto=440, icono_panel="ranking")])
+    fila_consenso = html.Div(className="fila fila-2", children=[
+        panel("clima-graf-consenso", "¿Coinciden los cuatro índices?",
+              f"Cuántos índices marcan condición cálida, neutra o fría en cada uno de los últimos "
+              f"{MESES_VENTANA} meses. Clic en una barra para elegir ese mes.",
+              area="consenso", alto=470, icono_panel="barras"),
+        panel("clima-graf-calendario", "Calendario del índice",
+              "Cada celda es un mes, con el color de su categoría. Clic en una celda para elegir ese mes.",
+              area="calendario", alto=470, icono_panel="cuadricula")])
+    contenido = html.Main(className="contenido", children=[
+        cabecera,
+        html.Section(className="clima-tarjetas", children=[tarjeta_clima(k) for k in INDICES_CLIMA]),
+        fila_evolucion, fila_variacion, fila_estacional, fila_consenso,
+        html.Footer(className="pie", children=[html.P(
+            "Fuente: ICEM.xlsx. Los valores marcados con * en el Excel se muestran como preliminares.")]),
+    ])
+    return html.Div(className="app", children=[barra_lateral_clima(clima), contenido])
+
+
 # ---- Portada y páginas en preparación ---------------------------------------
 def tarjeta_seccion(numero_tarjeta, seccion, dato):
     """Un botón grande de la portada (toda la tarjeta es clicable)."""
@@ -965,14 +1536,18 @@ def tarjeta_seccion(numero_tarjeta, seccion, dato):
     ])
 
 
-def crear_portada(base):
+def crear_portada(base, clima=None):
     anios = lista_anios(base)
     ultimo = anios[-1]
     ird_nacional = base.loc[base[COL_ANIO] == ultimo, COL_IRD].mean()
     partes = [f"{anios[0]}–{ultimo}", f"{base[COL_DPTO].nunique()} departamentos",
               f"IRD nacional {ultimo}: {numero(ird_nacional, 1)}"]
     dato_ird = [html.Span(t + (" · " if i < len(partes) - 1 else "")) for i, t in enumerate(partes)]
-    tarjetas = [tarjeta_seccion(i, s, dato_ird if s["ruta"] == RUTA_IRD else "Base de datos por cargar")
+    datos = {RUTA_IRD: dato_ird}
+    if clima is not None:
+        datos[RUTA_CLIMA] = [html.Span(f"{clima['etiqueta'].iloc[0]} – {clima['etiqueta'].iloc[-1]} · "),
+                             html.Span(f"{len(INDICES_CLIMA)} índices mensuales")]
+    tarjetas = [tarjeta_seccion(i, s, datos.get(s["ruta"], "Base de datos por cargar"))
                 for i, s in enumerate(SECCIONES, start=1)]
     return html.Div(className="portada", children=[
         html.Header(className="portada-hero", children=html.Div(className="portada-interior", children=[
@@ -1143,6 +1718,34 @@ border:1.5px solid var(--pacifico-medio);transition:background .2s ease,color .2
 .tarjeta:hover .tarjeta-boton .icono{transform:translateX(3px)}
 .portada-pie{padding:28px 48px 36px;color:var(--tinta-3);font-size:13px}
 
+/* Índices climáticos */
+.clima-tarjetas{display:grid;gap:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
+.clima-tarjeta{background:var(--superficie);border:2px solid var(--borde);border-radius:var(--radio);
+padding:14px 14px 12px;min-width:0;cursor:pointer;display:flex;flex-direction:column;gap:4px;
+transition:border-color .2s ease,box-shadow .2s ease}
+.clima-tarjeta:hover{box-shadow:0 6px 18px rgba(11,58,102,.10)}
+.clima-tarjeta.activa{border-color:var(--pacifico-medio);background:linear-gradient(180deg,#f3f8fd 0%,#fff 55%)}
+.clima-tarjeta-cabeza{display:flex;align-items:center;gap:10px}
+.clima-sigla{display:block;font-size:17px;font-weight:750;font-stretch:112%;color:var(--pacifico);line-height:1.15}
+.clima-nombre{display:block;font-size:12px;color:var(--tinta-2);line-height:1.3}
+.clima-valor{text-align:center;font-size:15px;color:var(--tinta)}
+.clima-valor strong{font-size:24px;font-weight:750;font-stretch:110%;color:var(--pacifico);font-variant-numeric:tabular-nums}
+.clima-valor sub{font-size:11px;color:var(--tinta-2)}
+.clima-estado{align-self:center;display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:650;
+color:var(--tinta);background:var(--niebla);border:1px solid var(--borde);border-radius:999px;padding:3px 12px}
+.clima-estado .criterio-color{margin-right:0}
+.clima-delta{text-align:center}
+.fila-historia{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.criterio-contenedor{margin-top:10px;overflow-x:auto}
+.criterio{width:100%;border-collapse:collapse;font-size:13.5px}
+.criterio th{text-align:left;font-size:12px;font-weight:700;color:var(--pacifico);text-transform:uppercase;
+letter-spacing:.04em;padding:8px 8px;border-bottom:2px solid var(--borde)}
+.criterio td{padding:7px 8px;border-bottom:1px solid var(--borde);color:var(--tinta);vertical-align:middle}
+.criterio td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.criterio-grupo{font-weight:600;color:var(--tinta-2)}
+.criterio-color{display:inline-block;width:22px;height:16px;border-radius:3px;border:1px solid #9aa9b8;
+vertical-align:middle;margin-right:8px}
+
 /* Páginas en preparación */
 .pagina-simple{max-width:760px;margin:0 auto;padding:40px 24px 56px}
 .enlace-volver{display:inline-flex;align-items:center;gap:8px;color:var(--pacifico-medio);font-size:14px;
@@ -1158,6 +1761,8 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 
 /* Pantallas medianas */
 @media (max-width:1280px){
+.clima-tarjetas{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fila-historia{grid-template-columns:minmax(0,1fr)}
 .fila-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
 .fila-3{grid-template-columns:repeat(2,minmax(0,1fr))}
 .fila-3 .area-variacion{grid-column:span 2}}
@@ -1195,7 +1800,8 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .portada-pie{padding:22px 16px 28px}
 .pagina-simple{padding:24px 12px 40px}
 .aviso{padding:22px 18px}
-.aviso h1{font-size:24px}}
+.aviso h1{font-size:24px}
+.clima-tarjetas{grid-template-columns:minmax(0,1fr);gap:10px}}
 """
 
 def css_olas():
@@ -1216,7 +1822,7 @@ PAGINA = ("<!DOCTYPE html><html lang='es'><head>{%metas%}<title>{%title%}</title
 # =============================================================================
 # 6. INTERACTIVIDAD (callbacks)
 # =============================================================================
-def registrar_navegacion(app, base):
+def registrar_navegacion(app, base, clima):
     """Muestra la portada o el tablero según la dirección: /, /ird, /indices-mensuales, /latam."""
     secciones = {s["ruta"]: s for s in SECCIONES}
 
@@ -1225,13 +1831,152 @@ def registrar_navegacion(app, base):
         ruta = (ruta or "/").rstrip("/") or "/"
         if ruta == RUTA_IRD:
             return crear_layout(base)
+        if ruta == RUTA_CLIMA and clima is not None:
+            return crear_layout_clima(clima)
         if ruta in secciones:
             return pagina_en_preparacion(secciones[ruta])
-        return crear_portada(base)
+        return crear_portada(base, clima)
 
     # Al cambiar de página, empezar desde arriba
     app.clientside_callback("function(ruta){window.scrollTo(0, 0); return ruta;}",
                             Output("arriba", "data"), Input("url", "pathname"))
+
+
+def registrar_callbacks_clima(app, clima):
+    claves = list(INDICES_CLIMA)
+    ultimo = len(clima) - 1
+    posicion = {(a, m): i for i, (a, m) in enumerate(zip(clima["anio"], clima["mes"]))}
+    por_fecha = {f.strftime("%Y-%m"): i for i, f in enumerate(clima["fecha"])}
+    por_etiqueta = {e: i for i, e in enumerate(clima["etiqueta"])}
+    graficos_clic = ["clima-graf-calendario", "clima-graf-evolucion", "clima-graf-variacion", "clima-graf-anio",
+                     "clima-graf-estacional", "clima-graf-top", "clima-graf-consenso"]
+
+    # Clics en tarjetas y gráficos, reproducir y último mes -> índice y mes
+    @app.callback(Output("clima-indice", "value"), Output("clima-mes", "value"),
+                  [Input(f"clima-tarjeta-{k}", "n_clicks") for k in claves]
+                  + [Input(g, "clickData") for g in graficos_clic]
+                  + [Input("clima-intervalo", "n_intervals"), Input("clima-btn-ultimo", "n_clicks")],
+                  State("clima-mes", "value"), prevent_initial_call=True)
+    def sincronizar_clima(*args):
+        mes_actual = args[-1]
+        origen = ctx.triggered_id
+        clic = ctx.triggered[0]["value"] if ctx.triggered else None
+        puntos = (clic or {}).get("points") if isinstance(clic, dict) else None
+        punto = puntos[0] if puntos else {}
+
+        def mes(i):
+            return i if i is not None else no_update
+
+        if isinstance(origen, str) and origen.startswith("clima-tarjeta-"):
+            return origen.replace("clima-tarjeta-", ""), no_update
+        if origen == "clima-btn-ultimo":
+            return no_update, ultimo
+        if origen == "clima-intervalo":
+            return no_update, (mes_actual + 1 if mes_actual < ultimo else 0)
+        if origen == "clima-graf-calendario":
+            return no_update, mes(posicion.get((punto.get("y"), punto.get("x"))))
+        if origen == "clima-graf-evolucion":
+            return no_update, mes(por_fecha.get(str(punto.get("x", ""))[:7]))
+        if origen in ("clima-graf-variacion", "clima-graf-consenso"):
+            return no_update, mes(por_etiqueta.get(punto.get("x")))
+        if origen == "clima-graf-top":
+            return no_update, mes(por_etiqueta.get(punto.get("y")))
+        if origen == "clima-graf-estacional":
+            custom = punto.get("customdata") or [None]
+            return no_update, mes(posicion.get((custom[0], punto.get("x"))))
+        if origen == "clima-graf-anio":
+            clave = punto.get("y")
+            return (clave if clave in INDICES_CLIMA else no_update), no_update
+        return no_update, no_update
+
+    @app.callback(Output("clima-intervalo", "disabled"), Output("clima-btn-play", "children"),
+                  Input("clima-btn-play", "n_clicks"), State("clima-intervalo", "disabled"),
+                  prevent_initial_call=True)
+    def alternar_reproduccion_clima(_n, desactivado):
+        reproducir = bool(desactivado)
+        return (not reproducir), ("❚❚ Pausar" if reproducir else "▶ Reproducir")
+
+    # Barra lateral, título y las cuatro tarjetas
+    salidas = [Output("clima-lateral-anio", "children"), Output("clima-lateral-mes", "children"),
+               Output("clima-titulo", "children")]
+    for k in claves:
+        salidas += [Output(f"clima-graf-{k}", "figure"), Output(f"clima-valor-{k}", "children"),
+                    Output(f"clima-estado-{k}", "children"), Output(f"clima-delta-{k}", "children"),
+                    Output(f"clima-tarjeta-{k}", "className")]
+
+    @app.callback(salidas, Input("clima-mes", "value"), Input("clima-indice", "value"))
+    def actualizar_tarjetas_clima(idx, clave_sel):
+        fila = clima.loc[idx]
+        previa = clima.loc[idx - 1] if idx > 0 else None
+        nombre_mes = MESES[fila["mes"] - 1]
+        salida = [str(fila["anio"]), nombre_mes, f"Índices climáticos, {nombre_mes.lower()} de {fila['anio']}"]
+        for k in claves:
+            cfg = INDICES_CLIMA[k]
+            valor, dec = fila[k], cfg["decimales"]
+            cat = clasificar_clima(valor, cfg)
+            if cat is None:
+                valor_html = html.Span(f"Sin dato en {fila['etiqueta']}")
+                estado = html.Span("Sin dato")
+            else:
+                seg = segmentos_clima(cfg)[cat]
+                valor_html = ["Valor preliminar" if fila[k + "_prelim"] else "Valor",
+                              html.Sub(f" {fila['etiqueta']}"), " = ", html.Strong(valor_clima(valor, dec))]
+                estado = [html.Span(className="criterio-color", style={"background": seg["color"]}), seg["texto"]]
+            anterior = previa[k] if previa is not None else np.nan
+            if es_vacio(valor) or es_vacio(anterior):
+                delta = html.Span("Sin mes anterior para comparar", className="delta delta-neutro")
+            else:
+                cambio = round(float(valor) - float(anterior), dec) + 0.0
+                if cambio == 0:
+                    delta = html.Span(f"= igual que {previa['etiqueta']}", className="delta delta-neutro")
+                else:
+                    sube = cambio > 0
+                    delta = html.Span([html.Span("▲" if sube else "▼", className="delta-icono"),
+                                       f" {con_signo(cambio, dec)} vs {previa['etiqueta']}"],
+                                      className="delta " + ("delta-sube" if sube else "delta-baja"))
+            salida += [grafico_velocimetro_clima(cfg, valor), valor_html, estado, delta,
+                       "clima-tarjeta activa" if k == clave_sel else "clima-tarjeta"]
+        return salida
+
+    # Evolución, criterio, variación a 12 meses y hace un año vs. hoy
+    @app.callback(Output("clima-graf-evolucion", "figure"), Output("clima-graf-evolucion-titulo", "children"),
+                  Output("clima-criterio", "children"), Output("clima-criterio-titulo", "children"),
+                  Output("clima-graf-variacion", "figure"), Output("clima-graf-variacion-titulo", "children"),
+                  Output("clima-graf-anio", "figure"), Output("clima-graf-anio-titulo", "children"),
+                  Input("clima-mes", "value"), Input("clima-indice", "value"))
+    def actualizar_evolucion_clima(idx, clave):
+        cfg = INDICES_CLIMA[clave]
+        fila = clima.loc[idx]
+        titulo_var = f"Variación a 12 meses del {clave}"
+        if idx >= 12:
+            cambio = variacion_12(clima, clave).loc[idx]
+            if not es_vacio(cambio):
+                titulo_var += (f": {con_signo(round(cambio, cfg['decimales']) + 0.0, cfg['decimales'])} "
+                               f"({clima.loc[idx - 12, 'etiqueta']} → {fila['etiqueta']})")
+        titulo_anio = (f"Hace un año vs. hoy: {clima.loc[idx - 12, 'etiqueta']} → {fila['etiqueta']}"
+                       if idx >= 12 else "Hace un año vs. hoy")
+        return (grafico_evolucion_clima(clima, clave, idx), f"Evolución del {clave} ({cfg['nombre']})",
+                tabla_criterio(clave), f"Criterio del {clave}",
+                grafico_variacion12_clima(clima, clave, idx), titulo_var,
+                grafico_anio_vs_hoy(clima, idx), titulo_anio)
+
+    # Estacionalidad, top 10, coincidencia de índices y calendario
+    @app.callback(Output("clima-graf-estacional", "figure"), Output("clima-graf-estacional-titulo", "children"),
+                  Output("clima-graf-top", "figure"), Output("clima-graf-top-titulo", "children"),
+                  Output("clima-graf-consenso", "figure"),
+                  Output("clima-graf-calendario", "figure"), Output("clima-graf-calendario-titulo", "children"),
+                  Input("clima-mes", "value"), Input("clima-indice", "value"))
+    def actualizar_patrones_clima(idx, clave):
+        fila = clima.loc[idx]
+        serie = clima[clave].dropna()
+        titulo_top = f"Los 10 meses más cálidos del {clave}"
+        if not es_vacio(fila[clave]):
+            puesto = int((serie > fila[clave]).sum()) + 1
+            titulo_top += f" · {fila['etiqueta']}: puesto {puesto} de {len(serie)}"
+        return (grafico_estacional_clima(clima, clave, idx), f"Cada año, mes a mes: {clave}",
+                grafico_top_clima(clima, clave, idx), titulo_top,
+                grafico_consenso_clima(clima, idx),
+                grafico_calendario_clima(clima, clave, idx), f"Calendario del {clave}")
 
 
 def registrar_callbacks(app, base, geojson):
@@ -1359,6 +2104,7 @@ def registrar_callbacks(app, base, geojson):
 # =============================================================================
 BASE = cargar_base()
 GEOJSON = cargar_geojson()
+CLIMA = cargar_clima()
 
 app = Dash(__name__, title=f"{TITULO_PORTADA} | Perú", external_stylesheets=[URL_FUENTES],
            suppress_callback_exceptions=True,  # las páginas se dibujan según la dirección
@@ -1366,9 +2112,14 @@ app = Dash(__name__, title=f"{TITULO_PORTADA} | Perú", external_stylesheets=[UR
 app.index_string = PAGINA
 server = app.server
 app.layout = crear_marco()
-app.validation_layout = html.Div([crear_marco(), crear_portada(BASE), crear_layout(BASE)])
-registrar_navegacion(app, BASE)
+paginas = [crear_marco(), crear_portada(BASE, CLIMA), crear_layout(BASE)]
+if CLIMA is not None:
+    paginas.append(crear_layout_clima(CLIMA))
+app.validation_layout = html.Div(paginas)
+registrar_navegacion(app, BASE, CLIMA)
 registrar_callbacks(app, BASE, GEOJSON)
+if CLIMA is not None:
+    registrar_callbacks_clima(app, CLIMA)
 
 if __name__ == "__main__":
     # En JupyterLab: "external" muestra el enlace http://127.0.0.1:8050 (ábrelo en el navegador).
