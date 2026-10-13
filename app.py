@@ -2011,49 +2011,53 @@ font-size:13px;font-weight:600;text-decoration:none;margin-bottom:-6px}
 
 /* Portada */
 .portada{min-height:100vh;display:flex;flex-direction:column}
-.portada-hero{position:relative;overflow:hidden;color:#fff;padding:96px 0 300px;min-height:640px;
+.portada-hero{position:relative;overflow:hidden;color:#fff;padding:96px 0 250px;min-height:640px;
 background:#0b3a66 url("/portada.jpg") center top/cover no-repeat}
 .portada-hero::before{content:"";position:absolute;inset:0;pointer-events:none;
-background:linear-gradient(180deg,rgba(237,243,249,0) 55%,#edf3f9 100%),
+background:linear-gradient(180deg,rgba(237,243,249,0) 62%,#edf3f9 100%),
 linear-gradient(100deg,rgba(6,30,54,.88) 0%,rgba(6,30,54,.55) 42%,rgba(6,30,54,0) 72%)}
 .portada-hero h1,.portada-sub{text-shadow:0 2px 14px rgba(0,0,0,.35)}
-.portada-interior,.portada-tarjetas,.portada-pie{width:100%;max-width:1200px;margin-left:auto;margin-right:auto}
+.portada-interior,.portada-tarjetas,.portada-pie{width:100%;max-width:1320px;margin-left:auto;margin-right:auto}
 .portada-interior{position:relative;z-index:1;padding:0 48px}
 .portada-antetitulo{font-size:13px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:#9fcbf2}
 .portada h1{margin-top:14px;font-size:54px;line-height:1.04;font-weight:800;font-stretch:118%;letter-spacing:-.025em;max-width:20ch}
 .portada-sub{margin-top:18px;font-size:18px;line-height:1.5;color:rgba(255,255,255,.82);max-width:58ch}
-.portada-tarjetas{position:relative;z-index:2;margin-top:-210px;padding:0 48px;display:grid;gap:22px;
+.portada-tarjetas{position:relative;z-index:2;margin-top:-110px;padding:0 48px;display:grid;gap:18px;
 grid-template-columns:repeat(3,minmax(0,1fr))}
-.tarjeta{display:flex;flex-direction:column;gap:12px;background:rgba(255,255,255,.96);border:1px solid var(--borde);
-border-radius:16px;padding:24px 24px 22px;color:var(--tinta);text-decoration:none;
-box-shadow:0 10px 30px rgba(11,58,102,.10);transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
-.tarjeta:hover{transform:translateY(-4px);border-color:var(--pacifico-medio);box-shadow:0 18px 40px rgba(11,58,102,.16)}
+/* Tarjetas planas: ícono a la izquierda, título y texto al lado, dato y botón abajo */
+.tarjeta{display:grid;grid-template-columns:46px minmax(0,1fr) auto;column-gap:14px;row-gap:4px;align-items:center;
+background:rgba(226,239,252,.80);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+border:1px solid rgba(255,255,255,.75);border-radius:14px;padding:16px 18px;color:var(--tinta);text-decoration:none;
+box-shadow:0 8px 24px rgba(11,58,102,.12);transition:transform .2s ease,box-shadow .2s ease,background .2s ease}
+.tarjeta:hover{transform:translateY(-3px);background:rgba(232,245,240,.92);box-shadow:0 14px 32px rgba(11,58,102,.18)}
 .tarjeta:focus-visible{outline:3px solid #9fcbf2;outline-offset:3px}
 .tarjeta-cabeza{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.tarjeta-icono{width:54px;height:54px;border-radius:15px;background:var(--azul-suave);color:var(--pacifico-medio);
+.tarjeta .tarjeta-cabeza{grid-column:1;grid-row:1/3;align-self:start}
+.tarjeta-icono{width:46px;height:46px;border-radius:13px;background:#ffffff;color:var(--pacifico-medio);
 display:grid;place-items:center;flex:none}
-.tarjeta-icono .icono{width:29px;height:29px}
+.tarjeta-icono .icono{width:25px;height:25px}
+.tarjeta .tarjeta-numero,.tarjeta .estado,.tarjeta .etiquetas{display:none}
+.tarjeta h2{grid-column:2/4;font-size:18px;line-height:1.2;font-weight:700;font-stretch:108%;color:var(--pacifico)}
+.tarjeta .tarjeta-texto{grid-column:2/4;font-size:13px;line-height:1.4;color:var(--tinta-2)}
 .tarjeta-numero{font-size:28px;font-weight:800;font-stretch:118%;color:var(--borde);font-variant-numeric:tabular-nums}
 .estado{align-self:flex-start;display:inline-flex;align-items:center;font-size:12px;font-weight:650;padding:3px 10px;border-radius:999px}
 .estado-listo{background:#e2f3ea;color:#0f6b48}
 .estado-pendiente{background:#fff2dc;color:#8a5200}
-.tarjeta h2,.aviso h1{font-size:22px;line-height:1.2;font-weight:700;font-stretch:108%;color:var(--pacifico)}
+.aviso h1{font-size:22px;line-height:1.2;font-weight:700;font-stretch:108%;color:var(--pacifico)}
 .tarjeta-texto{font-size:14.5px;color:var(--tinta-2)}
 .etiquetas{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 .etiquetas li{font-size:12px;font-weight:600;color:var(--pacifico-medio);background:var(--niebla);
 border:1px solid var(--borde);border-radius:6px;padding:2px 8px}
-.tarjeta-dato{margin-top:auto;padding-top:12px;border-top:1px solid var(--borde);font-size:13px;color:var(--tinta-3);
-font-variant-numeric:tabular-nums}
-.tarjeta-dato span{white-space:nowrap}
-.tarjeta-boton{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;
-padding:11px 18px;font-size:14.5px;font-weight:650;background:var(--pacifico-medio);color:#fff;
-border:1.5px solid var(--pacifico-medio);transition:background .2s ease,color .2s ease}
-.tarjeta:hover .tarjeta-boton{background:var(--pacifico);border-color:var(--pacifico)}
-.tarjeta-pendiente .tarjeta-boton{background:var(--superficie);color:var(--pacifico-medio)}
-.tarjeta-pendiente:hover .tarjeta-boton{background:var(--azul-suave);color:var(--pacifico);border-color:var(--pacifico-medio)}
-.tarjeta-boton .icono{width:18px;height:18px;transition:transform .2s ease}
+.tarjeta-dato{grid-column:1/3;min-width:0;margin-top:8px;padding-top:8px;border-top:1px solid rgba(15,47,80,.12);
+font-size:12px;line-height:1.35;color:var(--tinta-2);font-variant-numeric:tabular-nums}
+.tarjeta-boton{grid-column:3;align-self:end;margin-top:8px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+border-radius:999px;padding:7px 14px;font-size:13px;font-weight:650;background:#1f8a70;color:#fff;
+border:1.5px solid #1f8a70;transition:background .2s ease;white-space:nowrap}
+.tarjeta:hover .tarjeta-boton{background:#176b57;border-color:#176b57}
+.tarjeta-pendiente .tarjeta-boton{background:transparent;color:var(--pacifico-medio);border-color:var(--pacifico-medio)}
+.tarjeta-boton .icono{width:16px;height:16px;transition:transform .2s ease}
 .tarjeta:hover .tarjeta-boton .icono{transform:translateX(3px)}
-.portada-pie{padding:28px 48px 36px;color:var(--tinta-3);font-size:13px}
+.portada-pie{padding:22px 48px 32px;color:var(--tinta-3);font-size:13px}
 
 /* Índices climáticos */
 .clima-tarjetas{display:grid;gap:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -2135,12 +2139,12 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .panel-cabecera h3{font-size:15px}
 .area-mapa .grafico{height:400px!important}
 .area-calor .grafico{height:560px!important}
-.portada-hero{padding:40px 0 200px;min-height:0}
+.portada-hero{padding:40px 0 150px;min-height:0}
 .portada-interior{padding:0 16px}
 .portada h1{font-size:32px}
 .portada-sub{font-size:15.5px}
-.portada-tarjetas{grid-template-columns:minmax(0,1fr);padding:0 12px;margin-top:-130px;gap:14px}
-.tarjeta{padding:20px 18px 18px}
+.portada-tarjetas{grid-template-columns:minmax(0,1fr);padding:0 12px;margin-top:-70px;gap:12px}
+.tarjeta{padding:14px 14px}
 .portada-pie{padding:22px 16px 28px}
 .pagina-simple{padding:24px 12px 40px}
 .aviso{padding:22px 18px}
