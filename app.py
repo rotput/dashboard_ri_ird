@@ -1,7 +1,7 @@
 # =============================================================================
 #  DASHBOARD: ÍNDICE DE RIESGO DE DESASTRES (IRD) - PERÚ 2003-2025
 #  Pega todo en UNA celda de JupyterLab y ejecútala.
-#  Se abre en: http://127.0.0.1:8050
+#  Se abre en: http://127.0.0.1:8050  (portada; el tablero del IRD está en /ird)
 #
 #  Librerías (una sola vez, en otra celda):
 #      !pip install -U dash plotly pandas openpyxl
@@ -11,8 +11,8 @@
 #    2. FORMATO         -> números y nombres
 #    3. DATOS           -> carga del Excel y cálculos
 #    4. GRÁFICOS        -> una función por gráfico
-#    5. DISEÑO          -> íconos, tarjetas, paneles y estilos CSS
-#    6. INTERACTIVIDAD  -> callbacks
+#    5. DISEÑO          -> íconos, portada, tarjetas, paneles y estilos CSS
+#    6. INTERACTIVIDAD  -> navegación entre páginas y callbacks
 #    7. EJECUTAR
 # =============================================================================
 
@@ -113,6 +113,30 @@ SEPARADOR_DECIMAL = ","
 SEPARADOR_MILES = "."
 EVENTOS = {2017: "Niño Costero", 2023: "Ciclón Yaku"}   # anotaciones en la línea
 ETIQUETAR_TODOS_LOS_PUNTOS = False   # True = valor en cada punto de la línea
+
+# Portada: los 3 botones. "lista": True = el tablero ya funciona; False = muestra "En preparación".
+TITULO_PORTADA = "Seguimiento de Índices de Desastres"
+ANTETITULO_PORTADA = "Perú · Gestión del riesgo de desastres"
+SUBTITULO_PORTADA = ("Tres tableros para seguir las amenazas climáticas, el riesgo en los departamentos "
+                     "y la situación de América Latina.")
+RUTA_IRD = "/ird"
+SECCIONES = [
+    {"ruta": "/indices-mensuales", "icono": "ola", "lista": False,
+     "titulo": "Índices climáticos mensuales",
+     "descripcion": "Seguimiento mes a mes del ICEN, el ONI y otros índices que anticipan "
+                    "El Niño y La Niña.",
+     "etiquetas": ["ICEN", "ONI", "Otros índices"]},
+    {"ruta": RUTA_IRD, "icono": "medidor", "lista": True,
+     "titulo": "Índice de Riesgo de Desastres",
+     "descripcion": "Frecuencia y severidad de las emergencias en los 25 departamentos, "
+                    "con mapa, ranking y evolución anual.",
+     "etiquetas": ["IRD", "Frecuencia", "Severidad"]},
+    {"ruta": "/latam", "icono": "globo", "lista": False,
+     "titulo": "Estadísticas de América Latina",
+     "descripcion": "Estadísticas de desastres de los países de la región, para comparar "
+                    "al Perú con sus vecinos.",
+     "etiquetas": ["Países", "Comparación regional"]},
+]
 
 
 # =============================================================================
@@ -755,6 +779,14 @@ ICONOS = {
                   "<rect x='3' y='14' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/>",
     "calendario": "<rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18'/><path d='M8 3v4'/><path d='M16 3v4'/>",
     "indicador": "<path d='M4 20V10'/><path d='M10 20V4'/><path d='M16 20v-7'/><path d='M22 20H2'/>",
+    "ola": "<path d='M2 7c2.5-2.7 5-2.7 7.5 0s5 2.7 7.5 0c1.7-1.8 3.3-2.3 5-1.5'/>"
+           "<path d='M2 12.5c2.5-2.7 5-2.7 7.5 0s5 2.7 7.5 0c1.7-1.8 3.3-2.3 5-1.5'/>"
+           "<path d='M2 18c2.5-2.7 5-2.7 7.5 0s5 2.7 7.5 0c1.7-1.8 3.3-2.3 5-1.5'/>",
+    "globo": "<circle cx='12' cy='12' r='9'/><path d='M3 12h18'/>"
+             "<path d='M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9s1.2-6.4 3.8-9z'/>",
+    "flecha": "<path d='M5 12h14'/><path d='M13 6l6 6-6 6'/>",
+    "volver": "<path d='M19 12H5'/><path d='M11 18l-6-6 6-6'/>",
+    "reloj": "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
 }
 
 
@@ -778,6 +810,7 @@ def barra_lateral(departamentos, anios):
     marcas = {a: str(a) for a in anios if (a - anios[0]) % 5 == 0 and anios[-1] - a >= 3}
     marcas[anios[-1]] = str(anios[-1])
     return html.Aside(className="lateral", children=[
+        dcc.Link([icono("volver"), "Portada"], href="/", className="lateral-volver"),
         html.Div(className="marca", children=[html.Span("IRD", className="marca-sigla"),
                                               html.Span(TITULO, className="marca-nombre")]),
         html.Div(className="seleccion", children=[html.Div(id="lateral-anio", className="seleccion-anio"),
@@ -912,6 +945,69 @@ def crear_layout(base):
     return html.Div(className="app", children=[barra_lateral(departamentos, anios), contenido])
 
 
+# ---- Portada y páginas en preparación ---------------------------------------
+def tarjeta_seccion(numero_tarjeta, seccion, dato):
+    """Un botón grande de la portada (toda la tarjeta es clicable)."""
+    lista = seccion["lista"]
+    return dcc.Link(href=seccion["ruta"], className="tarjeta" + ("" if lista else " tarjeta-pendiente"),
+                    children=[
+        html.Div(className="tarjeta-cabeza", children=[
+            html.Span(icono(seccion["icono"]), className="tarjeta-icono"),
+            html.Span(f"{numero_tarjeta:02d}", className="tarjeta-numero")]),
+        html.Span("Disponible" if lista else "En preparación",
+                  className="estado " + ("estado-listo" if lista else "estado-pendiente")),
+        html.H2(seccion["titulo"]),
+        html.P(seccion["descripcion"], className="tarjeta-texto"),
+        html.Ul([html.Li(e) for e in seccion["etiquetas"]], className="etiquetas"),
+        html.P(dato, className="tarjeta-dato"),
+        html.Span([("Entrar al tablero" if lista else "Ver sección"), icono("flecha")],
+                  className="tarjeta-boton"),
+    ])
+
+
+def crear_portada(base):
+    anios = lista_anios(base)
+    ultimo = anios[-1]
+    ird_nacional = base.loc[base[COL_ANIO] == ultimo, COL_IRD].mean()
+    partes = [f"{anios[0]}–{ultimo}", f"{base[COL_DPTO].nunique()} departamentos",
+              f"IRD nacional {ultimo}: {numero(ird_nacional, 1)}"]
+    dato_ird = [html.Span(t + (" · " if i < len(partes) - 1 else "")) for i, t in enumerate(partes)]
+    tarjetas = [tarjeta_seccion(i, s, dato_ird if s["ruta"] == RUTA_IRD else "Base de datos por cargar")
+                for i, s in enumerate(SECCIONES, start=1)]
+    return html.Div(className="portada", children=[
+        html.Header(className="portada-hero", children=html.Div(className="portada-interior", children=[
+            html.P(ANTETITULO_PORTADA, className="portada-antetitulo"),
+            html.H1(TITULO_PORTADA),
+            html.P(SUBTITULO_PORTADA, className="portada-sub")])),
+        html.Nav(tarjetas, className="portada-tarjetas", **{"aria-label": "Tableros"}),
+        html.Footer(className="portada-pie", children=[
+            html.P("Elige un tablero para empezar. Puedes volver a esta portada desde cualquier página.")]),
+    ])
+
+
+def pagina_en_preparacion(seccion):
+    return html.Div(className="pagina-simple", children=[
+        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="enlace-volver"),
+        html.Section(className="aviso", children=[
+            html.Div(className="tarjeta-cabeza", children=[
+                html.Span(icono(seccion["icono"]), className="tarjeta-icono"),
+                html.Span("En preparación", className="estado estado-pendiente")]),
+            html.H1(seccion["titulo"]),
+            html.P(seccion["descripcion"], className="tarjeta-texto"),
+            html.Ul([html.Li(e) for e in seccion["etiquetas"]], className="etiquetas"),
+            html.Div(className="aviso-nota", children=[
+                html.Span(icono("reloj"), className="aviso-nota-icono"),
+                html.P("Este tablero se activará cuando se cargue su base de datos.")]),
+        ]),
+    ])
+
+
+def crear_marco():
+    """Lo que siempre está en la página: la dirección (URL) y el espacio donde se dibuja cada página."""
+    return html.Div([dcc.Location(id="url", refresh=False), dcc.Store(id="arriba"),
+                     html.Div(id="pagina")])
+
+
 CSS = """
 :root{--pacifico:#0b3a66;--pacifico-medio:#1f6fb2;--niebla:#edf3f9;--azul-suave:#e3eefa;
 --superficie:#fff;--borde:#d5e2ef;--tinta:#0f2f50;--tinta-2:#3f6488;--tinta-3:#6f8cab;
@@ -997,6 +1093,69 @@ display:grid;place-items:center;flex:none}
 .rc-slider-mark-text{font-size:11px;color:var(--tinta-3)!important}
 .rc-slider-handle{border-color:var(--pacifico-medio)!important}
 
+/* Enlace a la portada (barra lateral del IRD) */
+.lateral-volver{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;color:#9fcbf2;
+font-size:13px;font-weight:600;text-decoration:none;margin-bottom:-6px}
+.lateral-volver:hover{color:#fff}
+.lateral-volver .icono{width:16px;height:16px}
+
+/* Portada */
+.portada{min-height:100vh;display:flex;flex-direction:column}
+.portada-hero{position:relative;overflow:hidden;color:#fff;padding:72px 0 136px;
+background:linear-gradient(160deg,#0b3a66 0%,#0a2f54 65%,#082641 100%)}
+.portada-hero::after{content:"";position:absolute;left:0;right:0;bottom:0;height:220px;opacity:.09;
+background-image:var(--olas);background-size:240px 60px;pointer-events:none}
+.portada-interior,.portada-tarjetas,.portada-pie{width:100%;max-width:1200px;margin-left:auto;margin-right:auto}
+.portada-interior{position:relative;z-index:1;padding:0 48px}
+.portada-antetitulo{font-size:13px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:#9fcbf2}
+.portada h1{margin-top:14px;font-size:54px;line-height:1.04;font-weight:800;font-stretch:118%;letter-spacing:-.025em;max-width:20ch}
+.portada-sub{margin-top:18px;font-size:18px;line-height:1.5;color:rgba(255,255,255,.82);max-width:58ch}
+.portada-tarjetas{position:relative;z-index:2;margin-top:-84px;padding:0 48px;display:grid;gap:22px;
+grid-template-columns:repeat(3,minmax(0,1fr))}
+.tarjeta{display:flex;flex-direction:column;gap:12px;background:var(--superficie);border:1px solid var(--borde);
+border-radius:16px;padding:24px 24px 22px;color:var(--tinta);text-decoration:none;
+box-shadow:0 10px 30px rgba(11,58,102,.10);transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
+.tarjeta:hover{transform:translateY(-4px);border-color:var(--pacifico-medio);box-shadow:0 18px 40px rgba(11,58,102,.16)}
+.tarjeta:focus-visible{outline:3px solid #9fcbf2;outline-offset:3px}
+.tarjeta-cabeza{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.tarjeta-icono{width:54px;height:54px;border-radius:15px;background:var(--azul-suave);color:var(--pacifico-medio);
+display:grid;place-items:center;flex:none}
+.tarjeta-icono .icono{width:29px;height:29px}
+.tarjeta-numero{font-size:28px;font-weight:800;font-stretch:118%;color:var(--borde);font-variant-numeric:tabular-nums}
+.estado{align-self:flex-start;display:inline-flex;align-items:center;font-size:12px;font-weight:650;padding:3px 10px;border-radius:999px}
+.estado-listo{background:#e2f3ea;color:#0f6b48}
+.estado-pendiente{background:#fff2dc;color:#8a5200}
+.tarjeta h2,.aviso h1{font-size:22px;line-height:1.2;font-weight:700;font-stretch:108%;color:var(--pacifico)}
+.tarjeta-texto{font-size:14.5px;color:var(--tinta-2)}
+.etiquetas{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.etiquetas li{font-size:12px;font-weight:600;color:var(--pacifico-medio);background:var(--niebla);
+border:1px solid var(--borde);border-radius:6px;padding:2px 8px}
+.tarjeta-dato{margin-top:auto;padding-top:12px;border-top:1px solid var(--borde);font-size:13px;color:var(--tinta-3);
+font-variant-numeric:tabular-nums}
+.tarjeta-dato span{white-space:nowrap}
+.tarjeta-boton{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;
+padding:11px 18px;font-size:14.5px;font-weight:650;background:var(--pacifico-medio);color:#fff;
+border:1.5px solid var(--pacifico-medio);transition:background .2s ease,color .2s ease}
+.tarjeta:hover .tarjeta-boton{background:var(--pacifico);border-color:var(--pacifico)}
+.tarjeta-pendiente .tarjeta-boton{background:var(--superficie);color:var(--pacifico-medio)}
+.tarjeta-pendiente:hover .tarjeta-boton{background:var(--azul-suave);color:var(--pacifico);border-color:var(--pacifico-medio)}
+.tarjeta-boton .icono{width:18px;height:18px;transition:transform .2s ease}
+.tarjeta:hover .tarjeta-boton .icono{transform:translateX(3px)}
+.portada-pie{padding:28px 48px 36px;color:var(--tinta-3);font-size:13px}
+
+/* Páginas en preparación */
+.pagina-simple{max-width:760px;margin:0 auto;padding:40px 24px 56px}
+.enlace-volver{display:inline-flex;align-items:center;gap:8px;color:var(--pacifico-medio);font-size:14px;
+font-weight:600;text-decoration:none}
+.enlace-volver:hover{color:var(--pacifico)}
+.enlace-volver .icono{width:17px;height:17px}
+.aviso{margin-top:18px;background:var(--superficie);border:1px solid var(--borde);border-radius:16px;
+padding:32px;display:flex;flex-direction:column;gap:14px}
+.aviso h1{font-size:30px}
+.aviso-nota{display:flex;align-items:center;gap:12px;margin-top:8px;padding:14px 16px;border-radius:12px;
+background:var(--niebla);color:var(--tinta-2);font-size:14px}
+.aviso-nota-icono{color:var(--pacifico-medio);display:grid;place-items:center}
+
 /* Pantallas medianas */
 @media (max-width:1280px){
 .fila-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -1026,10 +1185,28 @@ display:grid;place-items:center;flex:none}
 .panel{padding:12px 10px 8px}
 .panel-cabecera h3{font-size:15px}
 .area-mapa .grafico{height:400px!important}
-.area-calor .grafico{height:560px!important}}
+.area-calor .grafico{height:560px!important}
+.portada-hero{padding:40px 0 104px}
+.portada-interior{padding:0 16px}
+.portada h1{font-size:32px}
+.portada-sub{font-size:15.5px}
+.portada-tarjetas{grid-template-columns:minmax(0,1fr);padding:0 12px;margin-top:-72px;gap:14px}
+.tarjeta{padding:20px 18px 18px}
+.portada-pie{padding:22px 16px 28px}
+.pagina-simple{padding:24px 12px 40px}
+.aviso{padding:22px 18px}
+.aviso h1{font-size:24px}}
 """
 
-CSS = CSS + css_iconos()
+def css_olas():
+    """Dibujo de olas para el fondo de la portada."""
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='240' height='60' viewBox='0 0 240 60' fill='none' "
+           "stroke='white' stroke-width='2'><path d='M0 20 Q30 4 60 20 T120 20 T180 20 T240 20'/>"
+           "<path d='M0 50 Q30 34 60 50 T120 50 T180 50 T240 50'/></svg>")
+    return f':root{{--olas:url("data:image/svg+xml,{urllib.parse.quote(svg)}")}}'
+
+
+CSS = CSS + css_iconos() + "\n" + css_olas()
 
 PAGINA = ("<!DOCTYPE html><html lang='es'><head>{%metas%}<title>{%title%}</title>{%favicon%}{%css%}"
           "<style>" + CSS + "</style></head><body>{%app_entry%}<footer>{%config%}{%scripts%}"
@@ -1039,6 +1216,24 @@ PAGINA = ("<!DOCTYPE html><html lang='es'><head>{%metas%}<title>{%title%}</title
 # =============================================================================
 # 6. INTERACTIVIDAD (callbacks)
 # =============================================================================
+def registrar_navegacion(app, base):
+    """Muestra la portada o el tablero según la dirección: /, /ird, /indices-mensuales, /latam."""
+    secciones = {s["ruta"]: s for s in SECCIONES}
+
+    @app.callback(Output("pagina", "children"), Input("url", "pathname"))
+    def mostrar_pagina(ruta):
+        ruta = (ruta or "/").rstrip("/") or "/"
+        if ruta == RUTA_IRD:
+            return crear_layout(base)
+        if ruta in secciones:
+            return pagina_en_preparacion(secciones[ruta])
+        return crear_portada(base)
+
+    # Al cambiar de página, empezar desde arriba
+    app.clientside_callback("function(ruta){window.scrollTo(0, 0); return ruta;}",
+                            Output("arriba", "data"), Input("url", "pathname"))
+
+
 def registrar_callbacks(app, base, geojson):
     anios = lista_anios(base)
     centros = centroides(geojson)
@@ -1165,11 +1360,14 @@ def registrar_callbacks(app, base, geojson):
 BASE = cargar_base()
 GEOJSON = cargar_geojson()
 
-app = Dash(__name__, title=f"{TITULO} | Perú", external_stylesheets=[URL_FUENTES],
+app = Dash(__name__, title=f"{TITULO_PORTADA} | Perú", external_stylesheets=[URL_FUENTES],
+           suppress_callback_exceptions=True,  # las páginas se dibujan según la dirección
            meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
 app.index_string = PAGINA
 server = app.server
-app.layout = crear_layout(BASE)
+app.layout = crear_marco()
+app.validation_layout = html.Div([crear_marco(), crear_portada(BASE), crear_layout(BASE)])
+registrar_navegacion(app, BASE)
 registrar_callbacks(app, BASE, GEOJSON)
 
 if __name__ == "__main__":
