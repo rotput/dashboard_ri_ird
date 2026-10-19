@@ -1,7 +1,7 @@
 # =============================================================================
 #  SEGUIMIENTO DE ÍNDICES DE DESASTRES - PERÚ
-#  Portada (/) + Índices climáticos (/indices-mensuales) + IRD (/ird) + América Latina (/latam)
-#  Archivos junto a app.py: INDICE_IRD_FINAL_ROBUSTO.xlsx, ICEM.xlsx, EMDAT_LATAM.xlsx y portada.jpg
+#  portadas (/) + Índices climáticos (/indices-mensuales) + IRD (/ird) + América Latina (/latam)
+#  Archivos junto a app.py: INDICE_IRD_FINAL_ROBUSTO.xlsx, ICEM.xlsx, EMDAT_LATAM.xlsx y portadas.jpg
 #  Pega todo en UNA celda de JupyterLab y ejecútala. Se abre en: http://127.0.0.1:8050
 #
 #  Librerías (una sola vez, en otra celda):
@@ -12,7 +12,7 @@
 #    2. FORMATO         -> números y nombres
 #    3. DATOS           -> carga del Excel y cálculos
 #    4. GRÁFICOS        -> una función por gráfico
-#    5. DISEÑO          -> íconos, portada, tarjetas, paneles y estilos CSS
+#    5. DISEÑO          -> íconos, portadas, tarjetas, paneles y estilos CSS
 #    6. INTERACTIVIDAD  -> navegación entre páginas y callbacks
 #    7. EJECUTAR
 # =============================================================================
@@ -116,10 +116,10 @@ SEPARADOR_MILES = "."
 EVENTOS = {2017: "Niño Costero", 2023: "Ciclón Yaku"}   # anotaciones en la línea
 ETIQUETAR_TODOS_LOS_PUNTOS = False   # True = valor en cada punto de la línea
 
-# Portada: los 3 botones. "lista": True = el tablero ya funciona; False = muestra "En preparación".
-TITULO_PORTADA = "Seguimiento de Índices de Desastres"
-ANTETITULO_PORTADA = "Perú · Gestión del riesgo de desastres"
-SUBTITULO_PORTADA = ("Tres tableros para seguir las amenazas climáticas, el riesgo en los departamentos "
+# portadas: los 3 botones. "lista": True = el tablero ya funciona; False = muestra "En preparación".
+TITULO_portadas = "Seguimiento de Índices de Desastres"
+ANTETITULO_portadas = "Perú · Gestión del riesgo de desastres"
+SUBTITULO_portadas = ("Tres tableros para seguir las amenazas climáticas, el riesgo en los departamentos "
                      "y la situación de América Latina.")
 RUTA_IRD = "/ird"
 SECCIONES = [
@@ -139,7 +139,7 @@ SECCIONES = [
                     "de la región, para comparar al Perú con sus vecinos.",
      "etiquetas": ["EM-DAT", "Frecuencia", "Costo % PBI"]},
 ]
-ARCHIVO_PORTADA = "portada.jpg"      # imagen de fondo de la portada (junto a app.py)
+ARCHIVO_portadas = "portadas.jpg"      # imagen de fondo de la portadas (junto a app.py)
 
 # ---- Índices climáticos mensuales (archivo ICEM.xlsx) -------------------------
 ARCHIVO_CLIMA = os.path.join(CARPETA, "ICEM.xlsx")
@@ -1496,7 +1496,7 @@ def barra_lateral(departamentos, anios):
     marcas = {a: str(a) for a in anios if (a - anios[0]) % 5 == 0 and anios[-1] - a >= 3}
     marcas[anios[-1]] = str(anios[-1])
     return html.Aside(className="lateral", children=[
-        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="lateral-volver"),
+        dcc.Link([icono("volver"), "Volver a la portadas"], href="/", className="lateral-volver"),
         html.Div(className="marca", children=[html.Span("IRD", className="marca-sigla"),
                                               html.Span(TITULO, className="marca-nombre")]),
         html.Div(className="seleccion", children=[html.Div(id="lateral-anio", className="seleccion-anio"),
@@ -1653,7 +1653,7 @@ def crear_layout(base):
 
 # ---- Página de índices climáticos ---------------------------------------------
 def barra_lateral_clima(clima):
-    """Portada · año y mes elegidos · filtros (índice, año, mes) · fuente."""
+    """portadas · año y mes elegidos · filtros (índice, año, mes) · fuente."""
     anios = sorted(clima["anio"].unique())
     a0, a1 = int(anios[0]), int(anios[-1])
     marcas_anio = {a: str(a) for a in range(a0, a1 + 1) if (a - a0) % 4 == 0 and a1 - a >= 3}
@@ -1661,7 +1661,7 @@ def barra_lateral_clima(clima):
     marcas_mes = {m: MESES[m - 1][0] for m in range(1, 13)}  # E F M A M J J A S O N D
     ultimo = clima.iloc[-1]
     return html.Aside(className="lateral", children=[
-        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="lateral-volver"),
+        dcc.Link([icono("volver"), "Volver a la portadas"], href="/", className="lateral-volver"),
         html.Div(className="marca", children=[html.Span("ICM", className="marca-sigla"),
                                               html.Span("Índices climáticos mensuales", className="marca-nombre")]),
         html.Div(className="seleccion", children=[html.Div(id="clima-lateral-anio", className="seleccion-anio"),
@@ -1766,14 +1766,14 @@ def crear_layout_clima(clima):
 
 # ---- Página de América Latina ---------------------------------------------------
 def barra_lateral_latam(latam):
-    """Portada · país y periodo elegidos · filtros (país, periodo e indicador)."""
+    """portadas · país y periodo elegidos · filtros (país, periodo e indicador)."""
     anios = latam["eventos"]["anio"]
     a0, a1 = int(anios.min()), int(anios.max())
     marcas = {a: str(a) for a in range(a0, a1 + 1) if (a - a0) % 10 == 0 and a1 - a >= 8}
     marcas[a1] = str(a1)
     paises = sorted(latam["eventos"]["pais"].unique())
     return html.Aside(className="lateral", children=[
-        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="lateral-volver"),
+        dcc.Link([icono("volver"), "Volver a la portadas"], href="/", className="lateral-volver"),
         html.Div(className="marca", children=[html.Span("LAT", className="marca-sigla"),
                                               html.Span("Estadísticas de América Latina", className="marca-nombre")]),
         html.Div(className="seleccion", children=[html.Div(id="latam-lateral-pais", className="seleccion-pais"),
@@ -1842,9 +1842,9 @@ def crear_layout_latam(latam):
     return html.Div(className="app", children=[barra_lateral_latam(latam), contenido])
 
 
-# ---- Portada y páginas en preparación ---------------------------------------
+# ---- portadas y páginas en preparación ---------------------------------------
 def tarjeta_seccion(numero_tarjeta, seccion, dato):
-    """Un botón grande de la portada (toda la tarjeta es clicable)."""
+    """Un botón grande de la portadas (toda la tarjeta es clicable)."""
     lista = seccion["lista"]
     return dcc.Link(href=seccion["ruta"], className="tarjeta" + ("" if lista else " tarjeta-pendiente"),
                     children=[
@@ -1862,7 +1862,7 @@ def tarjeta_seccion(numero_tarjeta, seccion, dato):
     ])
 
 
-def crear_portada(base, clima=None, latam=None):
+def crear_portadas(base, clima=None, latam=None):
     anios = lista_anios(base)
     ultimo = anios[-1]
     ird_nacional = base.loc[base[COL_ANIO] == ultimo, COL_IRD].mean()
@@ -1880,20 +1880,20 @@ def crear_portada(base, clima=None, latam=None):
                              html.Span(f"{numero(len(e), 0)} desastres")]
     tarjetas = [tarjeta_seccion(i, s, datos.get(s["ruta"], "Base de datos por cargar"))
                 for i, s in enumerate(SECCIONES, start=1)]
-    return html.Div(className="portada", children=[
-        html.Header(className="portada-hero", children=html.Div(className="portada-interior", children=[
-            html.P(ANTETITULO_PORTADA, className="portada-antetitulo"),
-            html.H1(TITULO_PORTADA),
-            html.P(SUBTITULO_PORTADA, className="portada-sub")])),
-        html.Nav(tarjetas, className="portada-tarjetas", **{"aria-label": "Tableros"}),
-        html.Footer(className="portada-pie", children=[
-            html.P("Elige un tablero para empezar. Puedes volver a esta portada desde cualquier página.")]),
+    return html.Div(className="portadas", children=[
+        html.Header(className="portadas-hero", children=html.Div(className="portadas-interior", children=[
+            html.P(ANTETITULO_portadas, className="portadas-antetitulo"),
+            html.H1(TITULO_portadas),
+            html.P(SUBTITULO_portadas, className="portadas-sub")])),
+        html.Nav(tarjetas, className="portadas-tarjetas", **{"aria-label": "Tableros"}),
+        html.Footer(className="portadas-pie", children=[
+            html.P("Elige un tablero para empezar. Puedes volver a esta portadas desde cualquier página.")]),
     ])
 
 
 def pagina_en_preparacion(seccion):
     return html.Div(className="pagina-simple", children=[
-        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="enlace-volver"),
+        dcc.Link([icono("volver"), "Volver a la portadas"], href="/", className="enlace-volver"),
         html.Section(className="aviso", children=[
             html.Div(className="tarjeta-cabeza", children=[
                 html.Span(icono(seccion["icono"]), className="tarjeta-icono"),
@@ -1999,7 +1999,7 @@ display:grid;place-items:center;flex:none}
 .rc-slider-mark-text{font-size:11px;color:var(--tinta-3)!important}
 .rc-slider-handle{border-color:var(--pacifico-medio)!important}
 
-/* Botón «Volver a la portada» (barra lateral de los tres tableros) */
+/* Botón «Volver a la portadas» (barra lateral de los tres tableros) */
 .lateral-volver{display:flex;align-items:center;justify-content:center;gap:9px;color:#fff;font-size:15px;
 font-weight:650;text-decoration:none;padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.14);
 border:1px solid rgba(255,255,255,.38);transition:background .2s ease}
@@ -2008,20 +2008,20 @@ border:1px solid rgba(255,255,255,.38);transition:background .2s ease}
 .lateral-fuente{margin-top:auto;font-size:12.5px;line-height:1.45;color:rgba(255,255,255,.75);
 border-top:1px solid rgba(255,255,255,.2);padding-top:12px}
 
-/* Portada */
-.portada{min-height:100vh;display:flex;flex-direction:column}
-.portada-hero{position:relative;overflow:hidden;color:#fff;padding:80px 0 190px;min-height:74vh;
-background:#0b3a66 url("/portada.jpg") center 35%/cover no-repeat}
-.portada-hero::before{content:"";position:absolute;inset:0;pointer-events:none;
+/* portadas */
+.portadas{min-height:100vh;display:flex;flex-direction:column}
+.portadas-hero{position:relative;overflow:hidden;color:#fff;padding:80px 0 190px;min-height:74vh;
+background:#0b3a66 url("/portadas.jpg") center 35%/cover no-repeat}
+.portadas-hero::before{content:"";position:absolute;inset:0;pointer-events:none;
 background:linear-gradient(180deg,rgba(237,243,249,0) 62%,#edf3f9 100%),
 linear-gradient(100deg,rgba(6,30,54,.88) 0%,rgba(6,30,54,.55) 42%,rgba(6,30,54,0) 72%)}
-.portada-hero h1,.portada-sub{text-shadow:0 2px 14px rgba(0,0,0,.35)}
-.portada-interior,.portada-tarjetas,.portada-pie{width:100%;max-width:1320px;margin-left:auto;margin-right:auto}
-.portada-interior{position:relative;z-index:1;padding:0 48px}
-.portada-antetitulo{font-size:13px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:#9fcbf2}
-.portada h1{margin-top:14px;font-size:54px;line-height:1.04;font-weight:800;font-stretch:118%;letter-spacing:-.025em;max-width:20ch}
-.portada-sub{margin-top:18px;font-size:18px;line-height:1.5;color:rgba(255,255,255,.82);max-width:58ch}
-.portada-tarjetas{position:relative;z-index:2;margin-top:-150px;padding:0 48px;display:grid;gap:18px;
+.portadas-hero h1,.portadas-sub{text-shadow:0 2px 14px rgba(0,0,0,.35)}
+.portadas-interior,.portadas-tarjetas,.portadas-pie{width:100%;max-width:1320px;margin-left:auto;margin-right:auto}
+.portadas-interior{position:relative;z-index:1;padding:0 48px}
+.portadas-antetitulo{font-size:13px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:#9fcbf2}
+.portadas h1{margin-top:14px;font-size:54px;line-height:1.04;font-weight:800;font-stretch:118%;letter-spacing:-.025em;max-width:20ch}
+.portadas-sub{margin-top:18px;font-size:18px;line-height:1.5;color:rgba(255,255,255,.82);max-width:58ch}
+.portadas-tarjetas{position:relative;z-index:2;margin-top:-150px;padding:0 48px;display:grid;gap:18px;
 grid-template-columns:repeat(3,minmax(0,1fr))}
 /* Tarjetas planas: ícono a la izquierda, título y texto al lado, dato y botón abajo */
 .tarjeta{display:grid;grid-template-columns:46px minmax(0,1fr) auto;column-gap:14px;row-gap:4px;align-items:center;
@@ -2056,7 +2056,7 @@ border:1.5px solid #1f8a70;transition:background .2s ease;white-space:nowrap}
 .tarjeta-pendiente .tarjeta-boton{background:transparent;color:var(--pacifico-medio);border-color:var(--pacifico-medio)}
 .tarjeta-boton .icono{width:16px;height:16px;transition:transform .2s ease}
 .tarjeta:hover .tarjeta-boton .icono{transform:translateX(3px)}
-.portada-pie{padding:22px 48px 32px;color:var(--tinta-3);font-size:13px}
+.portadas-pie{padding:22px 48px 32px;color:var(--tinta-3);font-size:13px}
 
 /* Índices climáticos */
 .clima-tarjetas{display:grid;gap:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -2163,13 +2163,13 @@ text-transform:uppercase;color:#d62f2f}
 .panel-cabecera h3{font-size:15px}
 .area-mapa .grafico{height:400px!important}
 .area-calor .grafico{height:560px!important}
-.portada-hero{padding:40px 0 130px;min-height:0}
-.portada-interior{padding:0 16px}
-.portada h1{font-size:32px}
-.portada-sub{font-size:15.5px}
-.portada-tarjetas{grid-template-columns:minmax(0,1fr);padding:0 12px;margin-top:-90px;gap:12px}
+.portadas-hero{padding:40px 0 130px;min-height:0}
+.portadas-interior{padding:0 16px}
+.portadas h1{font-size:32px}
+.portadas-sub{font-size:15.5px}
+.portadas-tarjetas{grid-template-columns:minmax(0,1fr);padding:0 12px;margin-top:-90px;gap:12px}
 .tarjeta{padding:14px 14px}
-.portada-pie{padding:22px 16px 28px}
+.portadas-pie{padding:22px 16px 28px}
 .pagina-simple{padding:24px 12px 40px}
 .aviso{padding:22px 18px}
 .aviso h1{font-size:24px}
@@ -2189,7 +2189,7 @@ PAGINA = ("<!DOCTYPE html><html lang='es'><head>{%metas%}<title>{%title%}</title
 # 6. INTERACTIVIDAD (callbacks)
 # =============================================================================
 def registrar_navegacion(app, base, clima, latam):
-    """Muestra la portada o el tablero según la dirección: /, /ird, /indices-mensuales, /latam."""
+    """Muestra la portadas o el tablero según la dirección: /, /ird, /indices-mensuales, /latam."""
     secciones = {s["ruta"]: s for s in SECCIONES}
 
     @app.callback(Output("pagina", "children"), Input("url", "pathname"))
@@ -2203,7 +2203,7 @@ def registrar_navegacion(app, base, clima, latam):
             return crear_layout_latam(latam)
         if ruta in secciones:
             return pagina_en_preparacion(secciones[ruta])
-        return crear_portada(base, clima, latam)
+        return crear_portadas(base, clima, latam)
 
     # Al cambiar de página, empezar desde arriba
     app.clientside_callback("function(ruta){window.scrollTo(0, 0); return ruta;}",
@@ -2604,20 +2604,20 @@ GEOJSON = cargar_geojson()
 CLIMA = cargar_clima()
 LATAM = cargar_latam()
 
-app = Dash(__name__, title=f"{TITULO_PORTADA} | Perú", external_stylesheets=[URL_FUENTES],
+app = Dash(__name__, title=f"{TITULO_portadas} | Perú", external_stylesheets=[URL_FUENTES],
            suppress_callback_exceptions=True,  # las páginas se dibujan según la dirección
            meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
 app.index_string = PAGINA
 server = app.server
 
 
-@server.route("/" + ARCHIVO_PORTADA)
-def imagen_portada():  # la imagen de la portada se sirve desde la carpeta de app.py
-    return send_from_directory(CARPETA, ARCHIVO_PORTADA)
+@server.route("/" + ARCHIVO_portadas)
+def imagen_portadas():  # la imagen de la portadas se sirve desde la carpeta de app.py
+    return send_from_directory(CARPETA, ARCHIVO_portadas)
 
 
 app.layout = crear_marco()
-paginas = [crear_marco(), crear_portada(BASE, CLIMA, LATAM), crear_layout(BASE)]
+paginas = [crear_marco(), crear_portadas(BASE, CLIMA, LATAM), crear_layout(BASE)]
 if CLIMA is not None:
     paginas.append(crear_layout_clima(CLIMA))
 if LATAM is not None:
