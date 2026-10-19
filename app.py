@@ -151,31 +151,49 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto
 COLORES_CALIDOS = ["#f03b20", "#fd8d3c", "#fecc5c", "#ffffb2"]   # de más fuerte a más débil
 COLORES_FRIOS = ["#bdd7e7", "#6baed6", "#3182bd"]                # de más débil a más fuerte
 COLOR_NEUTRO = "#ffffff"
-# Cada índice: columna del Excel, nombre, decimales, definición y criterio (tus tablas de "CRITERIO").
+# Cada índice: columna del Excel, nombre, decimales, unidad, definición y criterio (tus tablas de "CRITERIO").
 #   El ORDEN de esta lista es el orden de los filtros y de las tarjetas.
-#   definicion: texto del cuadro «Definición» (reemplázalo por el tuyo)
+#   unidad: se muestra en los ejes, las tarjetas y el criterio ("" = sin unidad)
+#   definicion: texto del cuadro «Definición»
 #   calidas: (magnitud, umbral) de la más fuerte a la más débil -> cálida si valor > umbral
 #   frias:   (magnitud, umbral) de la más débil a la más fuerte -> fría si valor < umbral
 #   incluye_limite=True cuando el criterio usa ≥ y ≤ (como el MEI v2)
 INDICES_CLIMA = {
-    "ICEN": {"columna": "ICE", "nombre": "Índice Costero El Niño", "decimales": 2,
-             "definicion": "Definición pendiente: aquí va el texto del ICEN.",
+    "ICEN": {"columna": "ICE", "nombre": "Índice Costero El Niño", "decimales": 2, "unidad": "°C",
+             "definicion": ("Mide las anomalías de temperatura superficial del mar en la región Niño 1+2, situada "
+                            "frente a Ecuador y el norte del Perú. Mediante un promedio de tres meses, permite al "
+                            "ENFEN diagnosticar la presencia y magnitud de las condiciones de El Niño y La Niña "
+                            "costeras."),
              "calidas": [("Extraordinaria", 3.5), ("Fuerte", 2.1), ("Moderada", 1.3), ("Débil", 0.5)],
              "frias": [("Débil", -0.7), ("Moderada", -1.1), ("Fuerte", -1.3)]},
-    "ITCP": {"columna": "ITCP", "nombre": "Índice Térmico Costero Peruano", "decimales": 1,
-             "definicion": "Definición pendiente: aquí va el texto del ITCP.",
+    "ITCP": {"columna": "ITCP", "nombre": "Índice Térmico Costero Peruano", "decimales": 1, "unidad": "°C",
+             "definicion": ("Evalúa las variaciones de temperatura del mar en el ecosistema de afloramiento costero "
+                            "peruano, una zona marina donde ascienden aguas profundas, frías y ricas en nutrientes. "
+                            "Permite caracterizar el estado térmico de este ecosistema, fundamental para la "
+                            "productividad marina y pesquera, pero no mide directamente la abundancia de peces ni la "
+                            "biodiversidad."),
              "calidas": [("Cálida", 0.4)], "frias": [("Fría", -0.6)]},
-    "LABCOS": {"columna": "LABCOS", "nombre": "Índice LABCOS", "decimales": 1, "decimales_criterio": 2,
-               "definicion": "Definición pendiente: aquí va el texto del LABCOS.",
+    "LABCOS": {"columna": "LABCOS", "nombre": "Índice de Laboratorios Costeros", "decimales": 1,
+               "decimales_criterio": 2, "unidad": "°C",
+               "definicion": ("Mide las variaciones de la temperatura superficial del mar en la franja costera del "
+                              "Perú, mediante registros de estaciones distribuidas a lo largo del litoral, desde Paita "
+                              "hasta Ilo. Integra estas mediciones para identificar si las aguas próximas a la costa "
+                              "peruana presentan condiciones más cálidas o más frías de lo habitual."),
                "calidas": [("Muy fuerte", 2.77), ("Fuerte", 1.37), ("Moderada", 0.78), ("Débil", 0.27)],
                "frias": [("Débil", -0.78), ("Moderada", -1.10), ("Fuerte", -1.31)]},
     # EHNOS: se usa el criterio del MEI v2 (±0,5). Si su criterio es otro, cámbialo aquí.
-    "EHNOS": {"columna": "EHNOS", "nombre": "Índice EHNOS", "decimales": 2,
-              "definicion": "Definición pendiente: aquí va el texto del EHNOS.",
+    "EHNOS": {"columna": "EHNOS", "nombre": "Índice de ENOS", "decimales": 2, "unidad": "°C",
+              "definicion": ("El ENOS (El Niño-Oscilación del Sur) es un fenómeno climático que combina variaciones "
+                             "del océano y la atmósfera en el Pacífico tropical y cuyos efectos pueden extenderse a "
+                             "distintas regiones del mundo."),
               "calidas": [("Cálida", 0.5)], "frias": [("Fría", -0.5)], "incluye_limite": True},
 }
 COLOR_CALIDO, COLOR_FRIO = "#f03b20", "#3182bd"
-FUENTE_CLIMA = ("Fuente: ENFEN. Los valores marcados con * en el Excel se muestran como preliminares.")
+FUENTE_CLIMA = "Fuente: IMARPE (SIOFEN). Los valores marcados con * en el Excel se muestran como preliminares."
+FUENTE_CLIMA_CORTA = "Fuente: IMARPE (SIOFEN)."   # la que va debajo de cada gráfico
+
+# Diseño de los títulos (los dos tableros nuevos): rojo de la presentación y azul oscuro
+COLOR_ROJO_PPT, COLOR_AZUL_PPT = "#d62f2f", "#0b2a5b"
 
 # ---- Estadísticas de América Latina (archivo EMDAT_LATAM.xlsx, ya procesado) ---
 ARCHIVO_LATAM = os.path.join(CARPETA, "EMDAT_LATAM.xlsx")
@@ -183,16 +201,32 @@ RUTA_LATAM = "/latam"
 PAIS_INICIAL = "Perú"
 ULTIMO_ANIO_COSTO = 2025     # EM-DAT todavía no tiene costos de 2026
 CORTE_PERIODOS = 2002        # Gráfico de dos periodos: 1980-2002 y 2003-2026
-# Colores de la ayuda memoria
-COLORES_SUBGRUPO = {"Biológico": "#156082", "Climatológico": "#7F7F7F", "Geofísico": "#F2AA84",
+FUENTE_LATAM = "Fuente: EM-DAT. Elaboración: DRF-VMH."
+ARTICULOS = {"Perú": "el Perú"}  # para los títulos: «en el Perú»
+
+# Los 2 filtros del tablero. Al cambiarlo cambian tarjetas, títulos y los 6 gráficos.
+INDICADORES_LATAM = {"eventos": "Número de desastres", "costo_pbi": "Costo económico (% del PBI)"}
+TEXTOS_LATAM = {   # términos de la presentación
+    "eventos": {"indicador": "Indicador 1: Frecuencia de los desastres",
+                "que_mide": "Número de desastres naturales registrados en cada país o territorio."},
+    "costo_pbi": {"indicador": "Indicador 2: Costo económico de los desastres",
+                  "que_mide": "Monto de los daños económicos ocasionados por los desastres, ajustado por "
+                              "inflación, como porcentaje del PBI."},
+}
+
+# Colores de la presentación
+COLORES_SUBGRUPO = {"Biológico": "#156082", "Climatológico": "#7F7F7F", "Geofísico": "#F2AA84",   # Gráfico 4
                     "Hidrológico": "#D9D9D9", "Meteorológico": "#94DCF8"}
+COLORES_TIPO = {"Hidrológico": "#2160C4", "Geofísico": "#D7262B", "Meteorológico": "#3BA9B9",     # Tarjetas y
+                "Biológico": "#8C93A3", "Climatológico": "#F0A04B"}                                # Gráficos 5 y 6
 ORDEN_SUBGRUPOS_PAIS = ["Hidrológico", "Geofísico", "Meteorológico", "Biológico", "Climatológico"]
+ICONOS_TIPO = {"Hidrológico": "ola", "Geofísico": "sismo", "Meteorológico": "nube",
+               "Biológico": "virus", "Climatológico": "sol"}
+NOMBRES_CORTOS = {"Movimiento de masa (húmedo)": "Mov. de masa (húmedo)",
+                  "Movimiento de masa (seco)": "Mov. de masa (seco)"}
 COLORES_CUARTIL_LATAM = {1: "#F2F089", 2: "#FD8D3C", 3: "#E31A1C", 4: "#800026"}
 COLOR_PERIODO_1, COLOR_PERIODO_2 = "#7F7F7F", "#C00000"
-COLOR_DISPERSION = "#156082"
-COLOR_TIPO_PAIS = "#F2AA84"
-INDICADORES_LATAM = {"eventos": "Número de desastres", "costo_pbi": "Costo económico (% del PBI)",
-                     "fallecidos": "Personas fallecidas"}
+COLOR_DISPERSION, COLOR_TENDENCIA = "#0B2A5B", "#C00000"
 
 
 # =============================================================================
@@ -475,6 +509,12 @@ def valor_clima(valor, decimales):
 def umbral_texto(valor, decimales=1):
     texto = f"{valor:+.{decimales}f}".replace(".", SEPARADOR_DECIMAL)
     return texto.replace("-", "−")
+
+
+def valor_con_unidad(valor, cfg):
+    """0.35 -> '0,35 °C' (la unidad sale de INDICES_CLIMA)."""
+    texto = valor_clima(valor, cfg["decimales"])
+    return texto if texto == "—" or not cfg.get("unidad") else f"{texto} {cfg['unidad']}"
 
 
 def intervalo_texto(seg, cfg):
@@ -1006,6 +1046,8 @@ def grafico_evolucion_clima(clima, clave, idx):
     cfg = INDICES_CLIMA[clave]
     dec = cfg["decimales"]
     lim_frio, lim_calido = limites_neutro(cfg)
+    unidad = cfg.get("unidad", "")
+    sufijo = f" {unidad}" if unidad else ""
     datos = clima[["fecha", "etiqueta", clave, clave + "_prelim"]].dropna(subset=[clave])
     t = datos["fecha"].to_numpy(dtype="datetime64[ns]").astype("int64")
     v = datos[clave].to_numpy(dtype=float)
@@ -1025,15 +1067,15 @@ def grafico_evolucion_clima(clima, clave, idx):
     fig.add_scatter(x=xs, y=np.minimum(ys, 0), mode="lines", fill="tozeroy", line=dict(width=0),
                     fillcolor=hex_a_rgba(COLOR_FRIO, 0.62), hoverinfo="skip", showlegend=False)
     segs = segmentos_clima(cfg)
-    custom = [[e, valor_clima(x, dec), segs[clasificar_clima(x, cfg)]["texto"], " (preliminar)" if p else ""]
+    custom = [[e, valor_con_unidad(x, cfg), segs[clasificar_clima(x, cfg)]["texto"], " (preliminar)" if p else ""]
               for e, x, p in zip(datos["etiqueta"], v, datos[clave + "_prelim"])]
     fig.add_scatter(x=datos["fecha"], y=v, mode="lines", line=dict(color=C["tinta"], width=1.4),
                     customdata=custom, showlegend=False,
                     hovertemplate="<b>%{customdata[0]}</b>: %{customdata[1]}%{customdata[3]}"
                                   "<br>%{customdata[2]}<extra></extra>")
-    for y, texto, color, ancla in [(lim_calido, f"Umbral cálido {umbral_texto(lim_calido, cfg.get('decimales_criterio', 1))}",
+    for y, texto, color, ancla in [(lim_calido, f"Umbral cálido {umbral_texto(lim_calido, cfg.get('decimales_criterio', 1))} {unidad}",
                                     COLOR_CALIDO, "bottom"),
-                                   (lim_frio, f"Umbral frío {umbral_texto(lim_frio, cfg.get('decimales_criterio', 1))}",
+                                   (lim_frio, f"Umbral frío {umbral_texto(lim_frio, cfg.get('decimales_criterio', 1))} {unidad}",
                                     COLOR_FRIO, "top")]:
         fig.add_hline(y=y, line=dict(color=color, width=1.2, dash="dash"), layer="below")
         fig.add_annotation(x=0, xref="paper", y=y, text=texto, showarrow=False, xanchor="left", yanchor=ancla,
@@ -1046,15 +1088,17 @@ def grafico_evolucion_clima(clima, clave, idx):
             continue
         arriba = serie[i] > 0
         fig.add_annotation(x=datos.loc[i, "fecha"], y=serie[i], ax=0, ay=-26 if arriba else 26,
-                           text=f"{valor_clima(serie[i], dec)} · {datos.loc[i, 'etiqueta']}", showarrow=True,
+                           text=f"{valor_con_unidad(serie[i], cfg)} · {datos.loc[i, 'etiqueta']}", showarrow=True,
                            arrowhead=0, arrowwidth=1, arrowcolor=C["tinta_3"],
                            font=dict(size=10, color=C["tinta_2"]), bgcolor=hex_a_rgba(C["superficie"], 0.8))
     fila = clima.loc[idx]
     if not es_vacio(fila[clave]):
         fig.add_scatter(x=[fila["fecha"]], y=[fila[clave]], mode="markers", hoverinfo="skip", showlegend=False,
                         marker=dict(size=14, color=C["superficie"], line=dict(color=C["tinta"], width=3)))
-        fig.add_annotation(x=fila["fecha"], y=fila[clave], ax=0, ay=-34 if fila[clave] >= 0 else 34,
-                           text=f"<b>{valor_clima(fila[clave], dec)} · {fila['etiqueta']}</b>", showarrow=True,
+        cerca_del_final = fila["fecha"] > datos["fecha"].max() - pd.DateOffset(months=18)
+        fig.add_annotation(x=fila["fecha"], y=fila[clave], ax=-60 if cerca_del_final else 0,
+                           ay=-34 if fila[clave] >= 0 else 34,
+                           text=f"<b>{valor_con_unidad(fila[clave], cfg)} · {fila['etiqueta']}</b>", showarrow=True,
                            arrowhead=0, arrowwidth=1.4, arrowcolor=C["tinta"],
                            font=dict(size=12, color=C["superficie"]), bgcolor=C["tinta"], borderpad=4)
     fig.add_vline(x=fila["fecha"], line=dict(color=C["pacifico_medio"], width=1, dash="dot"), layer="below")
@@ -1062,8 +1106,10 @@ def grafico_evolucion_clima(clima, clave, idx):
     pad = (alto - bajo) * 0.1
     fig.update_layout(
         hovermode="closest", margin=dict(l=4, r=4, t=36, b=4),
-        yaxis=dict(title=clave, range=[bajo - pad, alto + pad * 1.8], zeroline=False),
-        xaxis=dict(showgrid=False, tickformat="%Y", dtick="M24", rangeselector=dict(
+        yaxis=dict(title=clave, range=[bajo - pad, alto + pad * 1.8], zeroline=False, ticksuffix=sufijo),
+        xaxis=dict(showgrid=False, tickformat="%Y", dtick="M24",
+                   range=[datos["fecha"].min() - pd.DateOffset(months=2), datos["fecha"].max() + pd.DateOffset(months=4)],
+                   rangeselector=dict(
             x=0, y=1.02, yanchor="bottom", bgcolor=C["niebla"], activecolor=C["azul_suave"],
             font=dict(size=11, color=C["tinta"]),
             buttons=[dict(count=2, label="2 años", step="year", stepmode="backward"),
@@ -1087,7 +1133,7 @@ def grafico_estacional_clima(clima, clave, idx):
 
     def linea(anio, color, ancho, marcadores=False, opacidad=1.0):
         fila = tabla.loc[anio]
-        custom = [[anio, MESES[m - 1], valor_clima(x, dec)] for m, x in fila.items()]
+        custom = [[anio, MESES[m - 1], valor_con_unidad(x, cfg)] for m, x in fila.items()]
         fig.add_scatter(x=list(range(1, 13)), y=fila.values, mode="lines+markers" if marcadores else "lines",
                         line=dict(color=color, width=ancho, shape="spline", smoothing=0.5), opacity=opacidad,
                         marker=dict(size=7, color=color), customdata=custom, showlegend=False,
@@ -1110,7 +1156,8 @@ def grafico_estacional_clima(clima, clave, idx):
     fig.update_layout(hovermode="closest", margin=dict(l=4, r=40, t=8, b=4),
                       xaxis=dict(tickvals=list(range(1, 13)), ticktext=[m[:3] for m in MESES], range=[0.7, 13.2],
                                  showgrid=False),
-                      yaxis=dict(title=clave, zeroline=True, zerolinecolor=C["contexto"]))
+                      yaxis=dict(title=clave, zeroline=True, zerolinecolor=C["contexto"],
+                                 ticksuffix=f" {cfg['unidad']}" if cfg.get("unidad") else ""))
     return fig
 
 
@@ -1123,7 +1170,7 @@ def grafico_calendario_clima(clima, clave, idx):
     tabla = tabla.reindex(index=anios, columns=range(1, 13))
     z = [[clasificar_clima(v, cfg) for v in fila] for fila in tabla.to_numpy()]
     texto = [[valor_clima(v, 1) if not es_vacio(v) else "" for v in fila] for fila in tabla.to_numpy()]
-    custom = [[[f"{MESES[m - 1]} {a}", valor_clima(v, dec),
+    custom = [[[f"{MESES[m - 1]} {a}", valor_con_unidad(v, cfg),
                 segs[c]["texto"] if c is not None else "Sin dato"]
                for m, v, c in zip(range(1, 13), fila, zfila)]
               for a, fila, zfila in zip(anios, tabla.to_numpy(), z)]
@@ -1146,38 +1193,63 @@ def grafico_calendario_clima(clima, clave, idx):
     return fig
 
 
-# ---- 4.15 Ranking de países (barras en colores de cuartil) --------------------
+# ---- Ayudas para los gráficos de América Latina --------------------------------
+def nombre_corto(tipo):
+    return NOMBRES_CORTOS.get(tipo, tipo)
+
+
+def texto_cuartiles(datos, ind):
+    """Rango de cada cuartil como en la presentación: «122 a más», «78 – 121», ..."""
+    textos = {}
+    for q in COLORES_CUARTIL_LATAM:
+        valores = datos.loc[datos["q"] == q, ind]
+        if valores.empty:
+            textos[q] = "—"
+        elif q == 4:
+            textos[q] = f"{valor_latam(valores.min(), ind)} a más"
+        else:
+            textos[q] = f"{valor_latam(valores.min(), ind)} – {valor_latam(valores.max(), ind)}"
+    return textos
+
+
+def porcentaje_corto(v):
+    """Etiquetas de % del PBI: 0 -> '' ; 0,03 -> '<0,1 %'."""
+    if v <= 0:
+        return ""
+    return "<0,1 %" if v < 0.05 else f"{numero(v, 1)} %"
+
+
+# ---- 4.15 Gráfico 1: ranking de países (barras en colores de cuartil) --------
 def grafico_ranking_latam(tabla, pais_sel, ind):
     datos = tabla.assign(q=cuartiles_latam(tabla[ind])).sort_values(ind)
     sel = datos.index == pais_sel
     fig = go.Figure(go.Bar(
         y=datos.index, x=datos[ind], orientation="h",
         marker=dict(color=[COLORES_CUARTIL_LATAM[q] for q in datos["q"]],
-                    line=dict(color=[C["tinta"] if s else "rgba(0,0,0,0)" for s in sel],
+                    line=dict(color=[COLOR_AZUL_PPT if s else "rgba(0,0,0,0)" for s in sel],
                               width=[2.5 if s else 0 for s in sel])),
         text=[valor_latam(v, ind) for v in datos[ind]], textposition="outside", cliponaxis=False,
         textfont=dict(size=10.5, color=C["tinta"]),
         hovertemplate="<b>%{y}</b>: %{text}<extra></extra>"))
     fig.update_layout(margin=dict(l=4, r=8, t=4, b=4), bargap=0.22, showlegend=False,
-                      xaxis=dict(visible=False, range=[0, datos[ind].max() * 1.16]),
+                      xaxis=dict(visible=False, range=[0, max(datos[ind].max(), 1e-9) * 1.16]),
                       yaxis=dict(tickvals=list(datos.index),
                                  ticktext=[f"<b>{p}</b>" if p == pais_sel else p for p in datos.index],
                                  tickfont=dict(size=11, color=C["tinta"]), showline=True, linecolor=C["borde"]))
     return fig
 
 
-# ---- 4.16 Mapa de América Latina (cuartiles) ---------------------------------
+# ---- 4.16 Gráfico 2: mapa de América Latina (cuartiles) -----------------------
 def grafico_mapa_latam(tabla, pais_sel, ind):
     datos = tabla.assign(q=cuartiles_latam(tabla[ind]))
-    minimos = datos.groupby("q")[ind].min()
+    textos = texto_cuartiles(datos, ind)
     fig = go.Figure()
     for q in sorted(COLORES_CUARTIL_LATAM, reverse=True):
         sub = datos[datos["q"] == q]
-        hasta = valor_latam(minimos[q + 1], ind) if q < 4 else "más"
         color = COLORES_CUARTIL_LATAM[q]
         fig.add_trace(go.Choropleth(
             locations=sub["iso3"], z=[q] * len(sub), locationmode="ISO-3", showscale=False,
-            colorscale=[[0, color], [1, color]], name=f"{valor_latam(minimos[q], ind)} a {hasta}",
+            colorscale=[[0, color], [1, color]], name=textos[q],
             showlegend=True, marker=dict(line=dict(color="#ffffff", width=0.7)),
             customdata=[[p, valor_latam(v, ind)] for p, v in zip(sub.index, sub[ind])],
             hovertemplate="<b>%{customdata[0]}</b>: %{customdata[1]}<extra></extra>"))
@@ -1185,30 +1257,36 @@ def grafico_mapa_latam(tabla, pais_sel, ind):
         fig.add_trace(go.Choropleth(
             locations=[datos.loc[pais_sel, "iso3"]], z=[1], locationmode="ISO-3", showscale=False,
             colorscale=[[0, "rgba(0,0,0,0)"], [1, "rgba(0,0,0,0)"]], showlegend=False, hoverinfo="skip",
-            marker=dict(line=dict(color=C["tinta"], width=2.4))))
+            marker=dict(line=dict(color=COLOR_AZUL_PPT, width=2.4))))
     fig.update_geos(projection_type="mercator", resolution=50, showframe=False, showcoastlines=False,
                     showcountries=True, countrycolor="#ffffff", showland=True, landcolor="#e4ebf2",
                     showocean=False, showlakes=False, bgcolor="rgba(0,0,0,0)",
                     lonaxis=dict(range=[-118, -33]), lataxis=dict(range=[-56, 33]))
     fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
                       legend=dict(orientation="v", x=0.02, y=0.05, yanchor="bottom",
-                                  title=dict(text=INDICADORES_LATAM[ind], font=dict(size=11)),
+                                  font=dict(size=12, color=C["tinta"]),
                                   bgcolor=hex_a_rgba(C["superficie"], 0.85)))
     return fig
 
 
-# ---- 4.17 Dos periodos: 1980-2002 vs 2003-2026 --------------------------------
+# ---- 4.17 Gráfico 3 (número): dos periodos, 1980-2002 vs 2003-2026 -----------
 def grafico_periodos_latam(latam, pais_sel):
     e = latam["eventos"]
     antes = e[e["anio"] <= CORTE_PERIODOS].groupby("pais").size()
     despues = e[e["anio"] > CORTE_PERIODOS].groupby("pais").size()
-    tabla = pd.DataFrame({"antes": antes, "despues": despues}).fillna(0).sort_values("despues", ascending=False)
+    tabla = pd.DataFrame({"antes": antes, "despues": despues}).fillna(0)
+    tabla = tabla.loc[tabla.sum(axis=1).sort_values(ascending=False).index]   # mismo orden que el Gráfico 1
+    etiquetados = set(tabla.index[:5]) | {pais_sel}   # cifras solo en los 5 primeros y el país elegido
     a0, a1 = int(e["anio"].min()), int(e["anio"].max())
     fig = go.Figure()
-    for col, nombre, color in [("antes", f"{a0}–{CORTE_PERIODOS}", COLOR_PERIODO_1),
-                               ("despues", f"{CORTE_PERIODOS + 1}–{a1}", COLOR_PERIODO_2)]:
-        fig.add_bar(x=tabla.index, y=tabla[col], name=nombre, marker_color=color,
-                    text=[numero(v, 0) for v in tabla[col]], textposition="outside", cliponaxis=False,
+    for col, nombre, color in [("antes", f"{a0}-{CORTE_PERIODOS}", COLOR_PERIODO_1),
+                               ("despues", f"{CORTE_PERIODOS + 1}-{a1}", COLOR_PERIODO_2)]:
+        fig.add_bar(x=tabla.index, y=tabla[col], name=nombre,
+                    marker=dict(color=color, line=dict(color=[COLOR_AZUL_PPT if p == pais_sel else color
+                                                              for p in tabla.index],
+                                                       width=[2.5 if p == pais_sel else 0 for p in tabla.index])),
+                    text=[numero(v, 0) if p in etiquetados else "" for p, v in tabla[col].items()],
+                    textposition="outside", cliponaxis=False, textangle=0, constraintext="none",
                     textfont=dict(size=10, color=C["tinta_2"]),
                     hovertemplate="<b>%{x}</b> " + nombre + ": %{y}<extra></extra>")
     fig.update_layout(barmode="group", bargap=0.25, bargroupgap=0.05, margin=dict(l=4, r=4, t=36, b=4),
@@ -1216,11 +1294,11 @@ def grafico_periodos_latam(latam, pais_sel):
                       xaxis=dict(tickangle=-45, tickvals=list(tabla.index),
                                  ticktext=[f"<b>{p}</b>" if p == pais_sel else p for p in tabla.index],
                                  tickfont=dict(size=10.5, color=C["tinta"])),
-                      yaxis=dict(title="Número de desastres", range=[0, tabla.values.max() * 1.15]))
+                      yaxis=dict(title="N.º de desastres", range=[0, tabla.values.max() * 1.15]))
     return fig
 
 
-# ---- 4.18 Desastres y costo por año (dispersión con tendencia) ---------------
+# ---- 4.18 Gráfico 3 (costo): número anual de desastres y costo económico -----
 def grafico_dispersion_latam(latam, a0, a1):
     e = eventos_periodo(latam, a0, min(a1, ULTIMO_ANIO_COSTO))
     anual = e.groupby("anio").agg(n=("id", "size"), costo=("dano_miles_usd", "sum"))
@@ -1229,14 +1307,14 @@ def grafico_dispersion_latam(latam, a0, a1):
         return figura_vacia("Elige un periodo más largo para ver la relación.")
     fig = go.Figure()
     fig.add_scatter(x=anual["n"], y=anual["costo"], mode="markers", showlegend=False,
-                    marker=dict(size=11, color=COLOR_DISPERSION, opacity=0.85, line=dict(color="#ffffff", width=1)),
+                    marker=dict(size=11, color=COLOR_DISPERSION, opacity=0.9, line=dict(color="#ffffff", width=1)),
                     customdata=[[a, numero(c, 1)] for a, c in zip(anual.index, anual["costo"])],
                     hovertemplate="<b>%{customdata[0]}</b><br>%{x} desastres<br>"
                                   "US$ %{customdata[1]} mil millones<extra></extra>")
     pendiente, intercepto = np.polyfit(anual["n"], anual["costo"], 1)
     xs = np.array([anual["n"].min(), anual["n"].max()])
     fig.add_scatter(x=xs, y=intercepto + pendiente * xs, mode="lines", hoverinfo="skip", showlegend=False,
-                    line=dict(color=COLOR_DISPERSION, width=1.6, dash="dot"))
+                    line=dict(color=COLOR_TENDENCIA, width=2, dash="dash"))
     for anio in anual["costo"].nlargest(3).index:
         fig.add_annotation(x=anual.loc[anio, "n"], y=anual.loc[anio, "costo"], text=str(anio), showarrow=False,
                            yshift=14, font=dict(size=11, color=C["tinta"]))
@@ -1245,12 +1323,12 @@ def grafico_dispersion_latam(latam, a0, a1):
                        text=f"Correlación: <b>{numero(r, 2)}</b>", font=dict(size=12, color=C["tinta"]),
                        bgcolor=C["niebla"], borderpad=6)
     fig.update_layout(margin=dict(l=4, r=4, t=8, b=4), hovermode="closest",
-                      xaxis=dict(title="Número de desastres en el año", showgrid=True, gridcolor=C["rejilla"]),
+                      xaxis=dict(title="N.º de desastres anuales", showgrid=True, gridcolor=C["rejilla"]),
                       yaxis=dict(title="Costo anual (miles de millones de US$)", rangemode="tozero"))
     return fig
 
 
-# ---- 4.19 Distribución por tipo de desastre en los países de una zona --------
+# ---- 4.19 Gráfico 4: distribución por tipo en los países de una zona (100 %) --
 def grafico_tipos_zona(latam, a0, a1, zona, pais_sel, medida):
     e = eventos_periodo(latam, a0, a1)
     e = e[e["zona"] == zona]
@@ -1266,11 +1344,13 @@ def grafico_tipos_zona(latam, a0, a1, zona, pais_sel, medida):
     for sub, color in COLORES_SUBGRUPO.items():
         oscuro = sub in ("Biológico", "Climatológico")
         fig.add_bar(x=partes.index, y=partes[sub], name=sub, marker=dict(color=color, line=dict(color="#ffffff", width=0.6)),
-                    text=[f"{v:.0f}%" if v >= 12 else "" for v in partes[sub].fillna(0)], textposition="inside",
-                    insidetextanchor="middle", textfont=dict(size=10.5, color="#ffffff" if oscuro else C["tinta"]),
+                    text=[f"{numero(v, 1)}%" if v >= 4 else "" for v in partes[sub].fillna(0)], textposition="inside",
+                    insidetextanchor="middle", textangle=0,
+                    textfont=dict(size=9.5, color="#ffffff" if oscuro else C["tinta"]),
                     hovertemplate="<b>%{x}</b> · " + sub + ": %{y:.1f} %<extra></extra>")
-    fig.update_layout(barmode="stack", bargap=0.28, margin=dict(l=4, r=4, t=36, b=4),
-                      legend=dict(y=1.04, traceorder="normal"),
+    fig.update_layout(barmode="stack", bargap=0.28, margin=dict(l=4, r=4, t=8, b=4),
+                      legend=dict(orientation="h", y=-0.12, yanchor="top", x=0.5, xanchor="center",
+                                  traceorder="normal", font=dict(size=12)),
                       xaxis=dict(tickangle=-35 if len(paises) > 8 else 0, tickvals=list(partes.index),
                                  ticktext=[f"<b>{p}</b>" if p == pais_sel else p for p in partes.index],
                                  tickfont=dict(size=10.5, color=C["tinta"])),
@@ -1278,7 +1358,7 @@ def grafico_tipos_zona(latam, a0, a1, zona, pais_sel, medida):
     return fig
 
 
-# ---- 4.20 Un país: desastres o costo por tipo y subtipo ----------------------
+# ---- 4.20 Gráfico 5: un país, por tipo y subtipo (barras horizontales) -------
 def grafico_tipos_pais(latam, pais, a0, a1, medida):
     e = eventos_periodo(latam, a0, a1)
     e = e[e["pais"] == pais]
@@ -1288,38 +1368,69 @@ def grafico_tipos_pais(latam, pais, a0, a1, medida):
     else:
         pbi = latam["pbi"].loc[pais, "pbi_millones_usd"] * 1000
         valores = e.groupby("tipo")["dano_miles_usd"].sum() / pbi * 100
-    pares = pares.assign(valor=pares["tipo"].map(valores).fillna(0))
+    pares = pares.assign(valor=pares["tipo"].map(valores).fillna(0).astype(float))
     pares["orden"] = pares["subgrupo"].map({s: i for i, s in enumerate(ORDEN_SUBGRUPOS_PAIS)})
     pares = pares.sort_values(["orden", "valor"], ascending=[True, False])
-    textos = [(f"{numero(v, 1)} %" if medida == "costo" else numero(v, 0)) for v in pares["valor"]]
-    fig = go.Figure(go.Bar(
-        x=[list(pares["subgrupo"]), list(pares["tipo"])], y=pares["valor"], marker_color=COLOR_TIPO_PAIS,
-        text=textos, textposition="outside", cliponaxis=False, textfont=dict(size=11, color=C["tinta"]),
-        customdata=textos, hovertemplate="<b>%{x}</b>: %{customdata}<extra></extra>"))
+    pares["nombre"] = pares["tipo"].map(nombre_corto)
+    fig = go.Figure()
+    for sub in ORDEN_SUBGRUPOS_PAIS:
+        d = pares[pares["subgrupo"] == sub]
+        textos = [numero(v, 0) for v in d["valor"]] if medida == "eventos" else [porcentaje_corto(v) for v in d["valor"]]
+        fig.add_bar(y=d["nombre"], x=d["valor"], orientation="h", name=sub, marker_color=COLORES_TIPO[sub],
+                    text=textos, textposition="outside", cliponaxis=False,
+                    textfont=dict(size=11, color=COLOR_AZUL_PPT), customdata=textos,
+                    hovertemplate="<b>%{y}</b> (" + sub + "): %{customdata}<extra></extra>")
     tope = pares["valor"].max() or 1
-    fig.update_layout(margin=dict(l=4, r=4, t=16, b=4), bargap=0.35, showlegend=False,
-                      xaxis=dict(tickangle=-90, tickfont=dict(size=10, color=C["tinta"])),
-                      yaxis=dict(visible=False, range=[0, tope * 1.18]))
+    fig.update_layout(margin=dict(l=4, r=4, t=4, b=4), bargap=0.3, barmode="overlay",
+                      legend=dict(orientation="h", y=-0.04, yanchor="top", x=0.5, xanchor="center",
+                                  traceorder="normal", font=dict(size=12)),
+                      xaxis=dict(visible=False, range=[0, tope * 1.15]),
+                      yaxis=dict(categoryorder="array", categoryarray=list(pares["nombre"]), autorange="reversed",
+                                 tickfont=dict(size=11.5, color=C["tinta"]), showline=True, linecolor=C["borde"],
+                                 showgrid=False))
     return fig
 
 
-# ---- 4.21 Evolución anual en la región (por subgrupo) + el país elegido ------
-def grafico_evolucion_latam(latam, a0, a1, pais_sel):
+# ---- 4.21 Gráfico 6: un país, año por año y por tipo -------------------------
+def grafico_anual_pais(latam, pais, a0, a1, medida):
+    """Número: barras por tipo + promedio móvil de 5 años. Costo: millones de US$ con los años más costosos."""
+    costo = medida != "eventos"
+    if costo:
+        a1 = min(a1, ULTIMO_ANIO_COSTO)
+        if a0 > a1:
+            return figura_vacia(f"EM-DAT aún no tiene costos de {a0}.")
     e = eventos_periodo(latam, a0, a1)
-    tabla = e.pivot_table(index="anio", columns="subgrupo", values="id", aggfunc="count", fill_value=0)
-    tabla = tabla.reindex(index=range(a0, a1 + 1), columns=list(COLORES_SUBGRUPO), fill_value=0)
+    e = e[e["pais"] == pais]
+    if costo:
+        tabla = e.pivot_table(index="anio", columns="subgrupo", values="dano_miles_usd", aggfunc="sum") / 1000
+    else:
+        tabla = e.pivot_table(index="anio", columns="subgrupo", values="id", aggfunc="count")
+    tabla = tabla.reindex(index=range(a0, a1 + 1), columns=ORDEN_SUBGRUPOS_PAIS).fillna(0)
     fig = go.Figure()
-    for sub, color in COLORES_SUBGRUPO.items():
-        fig.add_bar(x=tabla.index, y=tabla[sub], name=sub, marker=dict(color=color, line=dict(width=0)),
-                    hovertemplate=sub + ": %{y}<extra></extra>")
-    pais = e[e["pais"] == pais_sel].groupby("anio").size().reindex(tabla.index, fill_value=0)
-    fig.add_scatter(x=pais.index, y=pais.values, name=pais_sel, mode="lines+markers",
-                    line=dict(color=C["tinta"], width=2.4), marker=dict(size=6, color=C["tinta"]),
-                    hovertemplate=f"<b>{pais_sel}</b>: %{{y}}<extra></extra>")
-    fig.update_layout(barmode="stack", bargap=0.15, hovermode="x unified", margin=dict(l=4, r=4, t=36, b=4),
+    formato = ":,.0f"
+    for sub in ORDEN_SUBGRUPOS_PAIS:
+        fig.add_bar(x=tabla.index, y=tabla[sub], name=sub, marker=dict(color=COLORES_TIPO[sub], line=dict(width=0)),
+                    hovertemplate=sub + f": %{{y{formato}}}" + (" millones US$" if costo else "") + "<extra></extra>")
+    total = tabla.sum(axis=1)
+    if costo:  # los 3 años más costosos, con el desastre que más costó
+        for anio in total[total > 0].nlargest(3).index:
+            fila = e[e["anio"] == anio].nlargest(1, "dano_miles_usd").iloc[0]
+            fig.add_annotation(x=anio, y=total[anio], yshift=12, showarrow=False,
+                               text=f"<b>{anio}</b> · {nombre_corto(fila['tipo'])}",
+                               font=dict(size=10.5, color=COLOR_AZUL_PPT), bgcolor=hex_a_rgba(C["superficie"], 0.85))
+        titulo_y = "Millones de US$"
+    else:
+        movil = total.rolling(5, min_periods=1).mean()
+        fig.add_scatter(x=movil.index, y=movil, name="Promedio de 5 años", mode="lines",
+                        line=dict(color=COLOR_AZUL_PPT, width=2.4, shape="spline", smoothing=0.6),
+                        hovertemplate="Promedio de 5 años: %{y:.1f}<extra></extra>")
+        titulo_y = "N.º de desastres"
+    fig.update_layout(barmode="stack", bargap=0.18, hovermode="x unified", margin=dict(l=4, r=4, t=36, b=4),
                       legend=dict(y=1.04, traceorder="normal"),
-                      xaxis=dict(dtick=2 if a1 - a0 > 12 else 1, tickfont=dict(size=10.5)),
-                      yaxis=dict(title="Número de desastres"))
+                      xaxis=dict(dtick=5 if a1 - a0 > 20 else (2 if a1 - a0 > 10 else 1), tickfont=dict(size=10.5)),
+                      yaxis=dict(title=titulo_y, rangemode="tozero"))
+    if costo:
+        fig.update_yaxes(range=[0, max(total.max(), 1) * 1.15])
     return fig
 
 
@@ -1355,6 +1466,13 @@ ICONOS = {
     "flecha": "<path d='M5 12h14'/><path d='M13 6l6 6-6 6'/>",
     "volver": "<path d='M19 12H5'/><path d='M11 18l-6-6 6-6'/>",
     "reloj": "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
+    "sismo": "<path d='M2 12h4l2-6 3 12 3-9 2 5 2-2h4'/>",
+    "nube": "<path d='M7 17a4.5 4.5 0 1 1 .9-8.9A6 6 0 0 1 19 10a3.5 3.5 0 0 1-.5 7z'/><path d='M12 13l-2 4h3l-2 4'/>",
+    "virus": "<circle cx='12' cy='12' r='5'/><path d='M12 2v5'/><path d='M12 17v5'/><path d='M2 12h5'/><path d='M17 12h5'/>"
+             "<path d='M5 5l3.5 3.5'/><path d='M15.5 15.5 19 19'/><path d='M19 5l-3.5 3.5'/><path d='M8.5 15.5 5 19'/>",
+    "sol": "<circle cx='12' cy='12' r='4.5'/><path d='M12 2v2.5'/><path d='M12 19.5V22'/><path d='M2 12h2.5'/>"
+           "<path d='M19.5 12H22'/><path d='M4.9 4.9l1.8 1.8'/><path d='M17.3 17.3l1.8 1.8'/><path d='M19.1 4.9l-1.8 1.8'/>"
+           "<path d='M6.7 17.3l-1.8 1.8'/>",
 }
 
 
@@ -1443,20 +1561,40 @@ def leyenda_cuartiles():
         for q in sorted(COLORES_CUARTIL, reverse=True)])
 
 
-def panel(id_grafico, titulo, descripcion, area, alto=380, debajo=None, leyenda=None, icono_panel=None):
-    titulo_html = [html.H3(titulo, id=f"{id_grafico}-titulo")]
-    if icono_panel:
-        titulo_html.insert(0, html.Span(icono(icono_panel), className="panel-icono"))
-    cabecera = [html.Div(titulo_html, className="panel-titulo")]
-    if descripcion:
-        cabecera.append(html.P(descripcion, className="panel-descripcion"))
-    hijos = [html.Header(className="panel-cabecera", children=cabecera)]
+def panel(id_grafico, titulo, descripcion, area, alto=380, debajo=None, leyenda=None, icono_panel=None,
+          numero_grafico=None, unidad=None, fuente=None, etiqueta=None):
+    """Recuadro con un gráfico.
+    Con numero_grafico (tableros de índices climáticos y América Latina) el título va como en la presentación:
+        GRÁFICO N.º 1            <- en rojo
+        Título del gráfico       <- id: <id_grafico>-titulo
+        (unidad)                 <- id: <id_grafico>-unidad
+        ... gráfico ...
+        Fuente                   <- debajo
+    Sin numero_grafico (tablero IRD) se mantiene el estilo con ícono."""
+    if numero_grafico is not None:
+        kicker = f"Gráfico N.º {numero_grafico}" + (f" · {etiqueta}" if etiqueta else "")
+        cabecera = [html.P(kicker, className="panel-kicker"),
+                    html.H3(titulo, id=f"{id_grafico}-titulo"),
+                    html.P(unidad or "", id=f"{id_grafico}-unidad", className="panel-unidad")]
+        if descripcion:
+            cabecera.append(html.P(descripcion, className="panel-descripcion"))
+        hijos = [html.Header(className="panel-cabecera panel-cabecera-num", children=cabecera)]
+    else:
+        titulo_html = [html.H3(titulo, id=f"{id_grafico}-titulo")]
+        if icono_panel:
+            titulo_html.insert(0, html.Span(icono(icono_panel), className="panel-icono"))
+        cabecera = [html.Div(titulo_html, className="panel-titulo")]
+        if descripcion:
+            cabecera.append(html.P(descripcion, className="panel-descripcion"))
+        hijos = [html.Header(className="panel-cabecera", children=cabecera)]
     if leyenda is not None:
         hijos.append(leyenda)
     hijos.append(html.Div(className="grafico", style={"height": f"{alto}px"}, children=dcc.Graph(
         id=id_grafico, config=CONFIG_GRAFICO, responsive=True, style={"height": "100%"})))
     if debajo is not None:
         hijos.append(debajo)
+    if fuente:
+        hijos.append(html.P(fuente, className="panel-pie"))
     return html.Section(className=f"panel area-{area}", children=hijos)
 
 
@@ -1566,8 +1704,9 @@ def tabla_criterio(clave):
     cfg = INDICES_CLIMA[clave]
     segs = segmentos_clima(cfg)
     varias = len(cfg["calidas"]) > 1
+    unidad = cfg.get("unidad", "")
     cabecera = html.Thead(html.Tr([html.Th("Categoría"), html.Th("Magnitud" if varias else ""),
-                                   html.Th("Intervalo")]))
+                                   html.Th(f"Intervalo ({unidad})" if unidad else "Intervalo")]))
     filas, anterior = [], None
     for seg in segs:
         grupo = seg["grupo"]
@@ -1581,42 +1720,42 @@ def tabla_criterio(clave):
 
 
 def panel_definicion():
-    """Cuadro con la definición del índice y su criterio (tabla)."""
+    """Cuadro con la definición del índice y su criterio (tabla). No lleva número: no es un gráfico."""
     return html.Section(className="panel area-definicion", children=[
-        html.Header(className="panel-cabecera", children=[
-            html.Div([html.Span(icono("ranking"), className="panel-icono"),
-                      html.H3(id="clima-definicion-titulo")], className="panel-titulo")]),
+        html.Header(className="panel-cabecera panel-cabecera-num", children=[
+            html.P("Definición y criterio", className="panel-kicker"),
+            html.H3(id="clima-definicion-titulo")]),
         html.H4("Definición", className="subtitulo-panel"),
         html.P(id="clima-definicion", className="definicion-texto"),
         html.H4("Criterio", className="subtitulo-panel"),
-        html.Div(id="clima-criterio", className="criterio-contenedor")])
+        html.Div(id="clima-criterio", className="criterio-contenedor"),
+        html.P(FUENTE_CLIMA_CORTA, className="panel-pie")])
 
 
 def crear_layout_clima(clima):
     """Orden de la página:
          título
-         tarjetas (ICEN, ITCP, LABCOS, EHNOS)
-         [Definición y criterio] [Evolución]
-         [Cada año, mes a mes]   [Calendario]"""
+         tarjetas (ICEN, ITCP, LABCOS, EHNOS)       <- sin número
+         [Definición y criterio] [Gráfico N.º 1: evolución]
+         [Gráfico N.º 2: cada año, mes a mes] [Gráfico N.º 3: calendario]"""
     primero, ultimo = clima["etiqueta"].iloc[0], clima["etiqueta"].iloc[-1]
-    cabecera = html.Header(className="cabecera", children=[
+    cabecera = html.Header(className="cabecera cabecera-ppt", children=[
+        html.P("Índices climáticos mensuales · Condición del mar frente al Perú", className="cabecera-antetitulo"),
         html.H1(id="clima-titulo"),
-        html.P(f"Condición del mar según cuatro índices mensuales, {primero} – {ultimo}",
-               className="cabecera-sub")])
+        html.P(f"Cuatro índices mensuales que dicen si el mar está en condición cálida, neutra o fría, "
+               f"{primero} – {ultimo}.", className="cabecera-sub")])
     fila_1 = html.Div(className="fila fila-2", children=[
         panel_definicion(),
-        panel("clima-graf-evolucion", "Evolución del índice",
-              "Rojo: por encima de cero (más cálido de lo normal). Azul: por debajo. Las líneas punteadas son "
-              "los umbrales del criterio. Clic en la línea para elegir un mes.",
-              area="evolucion", alto=440, icono_panel="tendencia")])
+        panel("clima-graf-evolucion", "", "Rojo: por encima de cero (más cálido de lo normal). Azul: por debajo. "
+              "Líneas punteadas: umbrales del criterio. Clic en la línea para elegir un mes.",
+              area="evolucion", alto=440, numero_grafico=1, fuente=FUENTE_CLIMA_CORTA)])
     fila_2 = html.Div(className="fila fila-2", children=[
-        panel("clima-graf-estacional", "Cada año, mes a mes",
-              "Cada línea es un año, de enero a diciembre. Resaltados: el año elegido (azul) y el año con el "
-              "valor más alto (rojo). La franja gris es el rango neutro.",
-              area="estacional", alto=470, icono_panel="ola"),
-        panel("clima-graf-calendario", "Calendario del índice",
-              "Cada celda es un mes, con el color de su categoría. Clic en una celda para elegir ese mes.",
-              area="calendario", alto=470, icono_panel="cuadricula")])
+        panel("clima-graf-estacional", "", "Cada línea es un año, de enero a diciembre. Azul oscuro: el año "
+              "elegido; rojo: el año con el valor más alto; franja gris: rango neutro.",
+              area="estacional", alto=470, numero_grafico=2, fuente=FUENTE_CLIMA_CORTA),
+        panel("clima-graf-calendario", "", "Cada celda es un mes, con el color de su categoría. "
+              "Clic en una celda para elegir ese mes.",
+              area="calendario", alto=470, numero_grafico=3, fuente=FUENTE_CLIMA_CORTA)])
     contenido = html.Main(className="contenido", children=[
         cabecera,
         html.Section(className="clima-tarjetas", children=[tarjeta_clima(k) for k in INDICES_CLIMA]),
@@ -1626,16 +1765,8 @@ def crear_layout_clima(clima):
 
 
 # ---- Página de América Latina ---------------------------------------------------
-KPIS_LATAM = [  # (id, título, ícono)
-    ("eventos", "Desastres registrados", "alerta"),
-    ("fallecidos", "Personas fallecidas", "persona"),
-    ("afectados", "Personas afectadas", "personas"),
-    ("dano", "Costo económico (US$ millones)", "barras"),
-    ("costo_pbi", "Costo económico (% del PBI)", "medidor"),
-]
-
-
 def barra_lateral_latam(latam):
+    """Portada · país y periodo elegidos · filtros (país, periodo e indicador)."""
     anios = latam["eventos"]["anio"]
     a0, a1 = int(anios.min()), int(anios.max())
     marcas = {a: str(a) for a in range(a0, a1 + 1) if (a - a0) % 10 == 0 and a1 - a >= 8}
@@ -1654,66 +1785,56 @@ def barra_lateral_latam(latam):
             html.Label([icono("calendario"), "Periodo"], className="control-etiqueta"),
             dcc.RangeSlider(id="latam-periodo", min=a0, max=a1, step=1, value=[a0, a1], marks=marcas,
                             allowCross=False, tooltip={"placement": "bottom", "always_visible": False}),
-            html.Label([icono("indicador"), "Indicador del ranking y el mapa"], className="control-etiqueta"),
-            dcc.RadioItems(id="latam-indicador", value="eventos", className="control-radio",
+            html.Label([icono("indicador"), "Indicador"], className="control-etiqueta"),
+            dcc.RadioItems(id="latam-indicador", value="eventos", className="control-radio control-radio-grande",
                            options=[{"label": v, "value": k} for k, v in INDICADORES_LATAM.items()]),
-            html.Button(f"Volver a {PAIS_INICIAL}, {a0}–{a1}", id="latam-btn-reiniciar", n_clicks=0,
+            html.Button(f"Volver a {PAIS_INICIAL}, {a0}-{a1}", id="latam-btn-reiniciar", n_clicks=0,
                         className="boton-secundario")]),
-        html.P("Consejo: haz clic en una barra del ranking o en el mapa para elegir un país.",
-               className="lateral-nota"),
+        html.P("Consejo: haz clic en una barra o en el mapa para elegir un país.", className="lateral-nota"),
+        html.P(FUENTE_LATAM, className="lateral-fuente"),
     ])
 
 
 def tarjetas_latam():
+    """6 tarjetas: el total y los 5 tipos de desastre (sus textos cambian con el indicador)."""
     tarjetas = []
-    for i, (clave, titulo, ic) in enumerate(KPIS_LATAM):
-        tarjetas.append(html.Div(className="kpi" + (" kpi-destacado" if i == 0 else ""), children=[
-            html.Div(className="kpi-cabeza", children=[html.Span(icono(ic), className="kpi-icono"),
-                                                       html.Span(titulo, className="kpi-titulo")]),
-            html.Div(id=f"latam-kpi-{clave}-valor", className="kpi-valor"),
-            html.Div(id=f"latam-kpi-{clave}-nota", className="kpi-delta")]))
+    for i, sub in enumerate([None] + ORDEN_SUBGRUPOS_PAIS):
+        if sub is None:
+            clase, estilo, ic, estilo_icono = "kpi kpi-destacado", {}, "alerta", {}
+        else:
+            color = COLORES_TIPO[sub]
+            clase, ic = "kpi kpi-tipo", ICONOS_TIPO[sub]
+            estilo = {"borderTop": f"4px solid {color}"}
+            estilo_icono = {"background": hex_a_rgba(color, 0.14), "color": color}
+        tarjetas.append(html.Div(className=clase, style=estilo, children=[
+            html.Div(className="kpi-cabeza", children=[html.Span(icono(ic), className="kpi-icono", style=estilo_icono),
+                                                       html.Span(id=f"latam-kpi-{i}-titulo", className="kpi-titulo")]),
+            html.Div(id=f"latam-kpi-{i}-valor", className="kpi-valor"),
+            html.Div(id=f"latam-kpi-{i}-nota", className="kpi-delta")]))
     return html.Section(className="latam-kpis", children=tarjetas)
 
 
 def crear_layout_latam(latam):
-    cabecera = html.Header(className="cabecera", children=[
+    """Orden de la página (títulos y unidades cambian con el indicador):
+         título
+         6 tarjetas (total + 5 tipos de desastre)
+         [Gráfico 1: ranking]          [Gráfico 2: mapa]
+         [Gráfico 3: dos periodos / correlación] [Gráfico 4: % por tipo en la zona]
+         [Gráfico 5: país por tipo y subtipo]    [Gráfico 6: país año por año]"""
+    cabecera = html.Header(className="cabecera cabecera-ppt", children=[
+        html.P(id="latam-indicador-texto", className="cabecera-antetitulo"),
         html.H1(id="latam-titulo"),
-        html.P("Desastres naturales en 26 países de América Latina y el Caribe. Fuente: EM-DAT.",
-               className="cabecera-sub")])
-    fila_1 = html.Div(className="fila fila-2", children=[
-        panel("latam-graf-ranking", "Ranking de países",
-              "Colores por cuartil: el más oscuro es el 25 % de países con el valor más alto. "
-              "Clic en una barra para elegir un país.", area="ranking-latam", alto=640, icono_panel="ranking"),
-        panel("latam-graf-mapa", "Mapa de América Latina",
-              "Mismos colores que el ranking. Clic en un país para elegirlo.",
-              area="mapa-latam", alto=640, icono_panel="globo")])
-    fila_2 = html.Div(className="fila fila-2", children=[
-        panel("latam-graf-periodos", "Desastres por país en dos periodos",
-              "Número de desastres en 1980–2002 (gris) y 2003–2026 (rojo). No depende del periodo elegido.",
-              area="periodos", alto=440, icono_panel="barras"),
-        panel("latam-graf-dispersion", "¿Más desastres, más costo?",
-              "Cada punto es un año de la región: número de desastres contra su costo económico. "
-              "La línea punteada es la tendencia.", area="dispersion", alto=440, icono_panel="burbujas")])
-    fila_3 = html.Div(className="fila fila-2", children=[
-        panel("latam-graf-zona-eventos", "Desastres según tipo de evento",
-              "Parte de los desastres de cada país según su origen.", area="zona-eventos", alto=440,
-              icono_panel="dona"),
-        panel("latam-graf-zona-costo", "Costo económico según tipo de evento",
-              "Parte del costo económico de cada país según el origen del desastre.", area="zona-costo",
-              alto=440, icono_panel="dona")])
-    fila_4 = html.Div(className="fila fila-2", children=[
-        panel("latam-graf-pais-eventos", "Desastres por tipo y subtipo",
-              "Número de desastres del país elegido, agrupados por origen.", area="pais-eventos", alto=520,
-              icono_panel="alerta"),
-        panel("latam-graf-pais-costo", "Costo por tipo y subtipo (% del PBI)",
-              "Daños acumulados de cada tipo como porcentaje del PBI del país.", area="pais-costo", alto=520,
-              icono_panel="medidor")])
-    fila_5 = html.Div(className="fila", children=[
-        panel("latam-graf-evolucion", "Evolución anual de los desastres en la región",
-              "Barras: desastres de los 26 países por origen. Línea: el país elegido.", area="evolucion-latam",
-              alto=420, icono_panel="tendencia")])
+        html.P(id="latam-sub", className="cabecera-sub")])
+
+    def grafico(n, alto, etiqueta=None):
+        return panel(f"latam-graf-{n}", "", None, area=f"latam-{n}", alto=alto, numero_grafico=n,
+                     fuente=FUENTE_LATAM, etiqueta=etiqueta)
+
+    fila_1 = html.Div(className="fila fila-2", children=[grafico(1, 640), grafico(2, 640, "Mapa")])
+    fila_2 = html.Div(className="fila fila-2", children=[grafico(3, 470), grafico(4, 470)])
+    fila_3 = html.Div(className="fila fila-2", children=[grafico(5, 500), grafico(6, 500)])
     contenido = html.Main(className="contenido", children=[
-        cabecera, tarjetas_latam(), fila_1, fila_2, fila_3, fila_4, fila_5,
+        cabecera, tarjetas_latam(), fila_1, fila_2, fila_3,
         html.Footer(className="pie", children=[html.P(
             "Fuente: EM-DAT (archivo EMDAT_LATAM.xlsx). Costos ajustados por inflación; el % del PBI compara los "
             "daños acumulados del periodo con el PBI del último año disponible. Hay costos hasta 2025.")]),
@@ -1969,7 +2090,7 @@ vertical-align:middle;margin-right:8px}
 
 /* América Latina */
 .seleccion-pais{font-size:44px;line-height:1;font-weight:800;font-stretch:118%;letter-spacing:-.02em}
-.latam-kpis{display:grid;gap:14px;grid-template-columns:repeat(5,minmax(0,1fr))}
+.latam-kpis{display:grid;gap:14px;grid-template-columns:repeat(6,minmax(0,1fr))}
 .kpi.kpi-destacado{border:2px solid var(--pacifico-medio);background:linear-gradient(180deg,#f3f8fd 0%,#fff 60%)}
 .latam-kpis .kpi{padding-bottom:12px}
 
@@ -1985,6 +2106,29 @@ padding:32px;display:flex;flex-direction:column;gap:14px}
 .aviso-nota{display:flex;align-items:center;gap:12px;margin-top:8px;padding:14px 16px;border-radius:12px;
 background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .aviso-nota-icono{color:var(--pacifico-medio);display:grid;place-items:center}
+
+/* Encabezado de los tableros de índices climáticos y América Latina (como la presentación) */
+.cabecera-ppt{padding-bottom:14px;border-bottom:2px solid #d62f2f}
+.cabecera-antetitulo{font-size:12.5px;font-weight:750;letter-spacing:.12em;text-transform:uppercase;color:#d62f2f;
+margin-bottom:6px}
+.cabecera-ppt h1{font-size:32px;font-weight:750;color:#0b2a5b}
+.cabecera-ppt .cabecera-sub{margin-top:6px;color:var(--tinta-2);max-width:110ch}
+
+/* Paneles numerados: GRÁFICO N.º 1 / título / unidad / fuente */
+.panel-cabecera-num{padding-bottom:10px;margin-bottom:8px;border-bottom:1px solid var(--borde)}
+.panel-kicker{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:750;letter-spacing:.1em;
+text-transform:uppercase;color:#d62f2f}
+.panel-kicker::before{content:"";width:18px;height:3px;border-radius:2px;background:#d62f2f;flex:none}
+.panel-cabecera-num h3{margin-top:5px;font-size:17px;font-weight:700;line-height:1.3;color:#0b2a5b}
+.panel-unidad{margin-top:2px;font-size:12.5px;color:var(--tinta-3)}
+.panel-unidad:empty{display:none}
+.panel-cabecera-num .panel-descripcion{margin-top:6px}
+.panel-pie{margin-top:6px;padding-top:7px;border-top:1px dashed var(--borde);font-size:11.5px;color:var(--tinta-3)}
+
+/* Tarjetas por tipo de desastre */
+.kpi-tipo .kpi-valor{color:#0b2a5b}
+.kpi-unidad{font-size:14px;font-weight:600;color:var(--tinta-2)}
+.control-radio-grande{gap:6px;font-size:14.5px;font-weight:600}
 
 /* Pantallas medianas */
 @media (max-width:1280px){
@@ -2005,6 +2149,7 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .contenido{padding:18px 12px 28px;gap:14px}
 .cabecera h1{font-size:24px}
 .cabecera-sub{font-size:13.5px}
+.cabecera-ppt h1{font-size:24px}
 .fila-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .fila-kpis .area-principal{grid-column:span 2}
 .kpi{padding:12px 12px 6px}
@@ -2030,7 +2175,6 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .aviso h1{font-size:24px}
 .clima-tarjetas{grid-template-columns:minmax(0,1fr);gap:10px}
 .latam-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.latam-kpis .kpi-destacado{grid-column:span 2}
 .seleccion-pais{font-size:34px}}
 """
 
@@ -2071,6 +2215,8 @@ def registrar_callbacks_clima(app, clima):
     ultimo = len(clima) - 1
     posicion = {(a, m): i for i, (a, m) in enumerate(zip(clima["anio"], clima["mes"]))}
     por_fecha = {f.strftime("%Y-%m"): i for i, f in enumerate(clima["fecha"])}
+    primero_txt, ultimo_txt = clima["etiqueta"].iloc[0], clima["etiqueta"].iloc[-1]
+    a0, a1 = int(clima["anio"].min()), int(clima["anio"].max())
 
     def ubicar(anio, mes):
         """Fila del mes elegido; si ese mes aún no tiene dato, el último mes con dato de ese año."""
@@ -2141,7 +2287,7 @@ def registrar_callbacks_clima(app, clima):
         salida = [str(fila["anio"]), nombre_mes, f"Índices climáticos, {nombre_mes.lower()} de {fila['anio']}"]
         for k in claves:
             cfg = INDICES_CLIMA[k]
-            valor, dec = fila[k], cfg["decimales"]
+            valor, dec, unidad = fila[k], cfg["decimales"], cfg.get("unidad", "")
             cat = clasificar_clima(valor, cfg)
             if cat is None:
                 valor_html = html.Span(f"Sin dato en {fila['etiqueta']}")
@@ -2149,7 +2295,7 @@ def registrar_callbacks_clima(app, clima):
             else:
                 seg = segmentos_clima(cfg)[cat]
                 valor_html = ["Valor preliminar" if fila[k + "_prelim"] else "Valor",
-                              html.Sub(f" {fila['etiqueta']}"), " = ", html.Strong(valor_clima(valor, dec))]
+                              html.Sub(f" {fila['etiqueta']}"), " = ", html.Strong(valor_con_unidad(valor, cfg))]
                 estado = [html.Span(className="criterio-color", style={"background": seg["color"]}), seg["texto"]]
             anterior = previa[k] if previa is not None else np.nan
             if es_vacio(valor) or es_vacio(anterior):
@@ -2161,26 +2307,29 @@ def registrar_callbacks_clima(app, clima):
                 else:
                     sube = cambio > 0
                     delta = html.Span([html.Span("▲" if sube else "▼", className="delta-icono"),
-                                       f" {con_signo(cambio, dec)} vs {previa['etiqueta']}"],
+                                       f" {con_signo(cambio, dec)} {unidad} vs {previa['etiqueta']}"],
                                       className="delta " + ("delta-sube" if sube else "delta-baja"))
             salida += [grafico_velocimetro_clima(cfg, valor), valor_html, estado, delta,
                        "clima-tarjeta activa" if k == clave_sel else "clima-tarjeta"]
         return salida
 
-    # Definición y criterio, evolución, cada año mes a mes y calendario
+    # Definición y criterio + Gráficos N.º 1, 2 y 3 (figura, título y unidad)
     @app.callback(Output("clima-definicion-titulo", "children"), Output("clima-definicion", "children"),
                   Output("clima-criterio", "children"),
-                  Output("clima-graf-evolucion", "figure"), Output("clima-graf-evolucion-titulo", "children"),
-                  Output("clima-graf-estacional", "figure"), Output("clima-graf-estacional-titulo", "children"),
-                  Output("clima-graf-calendario", "figure"), Output("clima-graf-calendario-titulo", "children"),
+                  [Output(f"clima-graf-{g}{parte}", prop) for g in ("evolucion", "estacional", "calendario")
+                   for parte, prop in (("", "figure"), ("-titulo", "children"), ("-unidad", "children"))],
                   Input("clima-anio", "value"), Input("clima-mes", "value"), Input("clima-indice", "value"))
     def actualizar_graficos_clima(anio, mes, clave):
         idx = ubicar(anio, mes)
         cfg = INDICES_CLIMA[clave]
+        unidad = f"({cfg['unidad']})" if cfg.get("unidad") else ""
         return (f"{clave}: {cfg['nombre']}", cfg.get("definicion", ""), tabla_criterio(clave),
-                grafico_evolucion_clima(clima, clave, idx), f"Evolución del {clave}",
-                grafico_estacional_clima(clima, clave, idx), f"Cada año, mes a mes: {clave}",
-                grafico_calendario_clima(clima, clave, idx), f"Calendario del {clave}")
+                grafico_evolucion_clima(clima, clave, idx),
+                f"Evolución del {clave}, {primero_txt} – {ultimo_txt}", unidad,
+                grafico_estacional_clima(clima, clave, idx),
+                f"{clave} de cada año, mes a mes, {a0}-{a1}", unidad,
+                grafico_calendario_clima(clima, clave, idx),
+                f"Calendario del {clave}, {a0}-{a1}", f"{unidad} · color según el criterio".strip(" ·"))
 
 
 def registrar_callbacks_latam(app, latam):
@@ -2189,87 +2338,142 @@ def registrar_callbacks_latam(app, latam):
     por_iso = dict(zip(e["iso3"], e["pais"]))
     paises = set(e["pais"])
     zonas = dict(zip(e["pais"], e["zona"]))
+    en_zona = {"Sudamérica": "en Sudamérica", "Caribe": "en el Caribe"}
 
-    # Clic en el ranking o en el mapa, y botón de reinicio -> país y periodo
+    def periodo_efectivo(periodo, ind):
+        """El costo solo llega a 2025: con «costo», el periodo se recorta."""
+        p0, p1 = periodo
+        if ind == "costo_pbi":
+            p1 = min(p1, ULTIMO_ANIO_COSTO)
+            p0 = min(p0, p1)
+        return p0, p1
+
+    def con_articulo(pais):
+        return ARTICULOS.get(pais, pais)
+
+    # Clic en el ranking, el mapa, los periodos o los tipos por zona -> país; botón -> reinicio
     @app.callback(Output("latam-pais", "value"), Output("latam-periodo", "value"),
-                  Input("latam-graf-ranking", "clickData"), Input("latam-graf-mapa", "clickData"),
+                  Input("latam-graf-1", "clickData"), Input("latam-graf-2", "clickData"),
+                  Input("latam-graf-3", "clickData"), Input("latam-graf-4", "clickData"),
                   Input("latam-btn-reiniciar", "n_clicks"), prevent_initial_call=True)
-    def sincronizar_latam(clic_ranking, clic_mapa, _n):
+    def sincronizar_latam(*_):
         origen = ctx.triggered_id
         if origen == "latam-btn-reiniciar":
             return PAIS_INICIAL, [a0, a1]
-        clic = clic_ranking if origen == "latam-graf-ranking" else clic_mapa
+        clic = ctx.triggered[0]["value"] if ctx.triggered else None
         punto = ((clic or {}).get("points") or [{}])[0]
-        pais = punto.get("y") if origen == "latam-graf-ranking" else por_iso.get(punto.get("location"))
+        if origen == "latam-graf-1":
+            pais = punto.get("y")
+        elif origen == "latam-graf-2":
+            pais = por_iso.get(punto.get("location"))
+        else:  # en el gráfico de correlación la x es un número: no cambia nada
+            pais = punto.get("x")
         return (pais if pais in paises else no_update), no_update
 
-    # Barra lateral, título y tarjetas
-    @app.callback([Output("latam-lateral-pais", "children"), Output("latam-lateral-periodo", "children"),
-                   Output("latam-titulo", "children")]
-                  + [Output(f"latam-kpi-{k}-{parte}", "children") for k, _, _ in KPIS_LATAM for parte in ("valor", "nota")],
-                  Input("latam-pais", "value"), Input("latam-periodo", "value"))
-    def actualizar_resumen_latam(pais, periodo):
-        p0, p1 = periodo
+    # Barra lateral, encabezado y las 6 tarjetas
+    salidas = [Output("latam-lateral-pais", "children"), Output("latam-lateral-periodo", "children"),
+               Output("latam-indicador-texto", "children"), Output("latam-titulo", "children"),
+               Output("latam-sub", "children")]
+    salidas += [Output(f"latam-kpi-{i}-{parte}", "children") for i in range(6) for parte in ("titulo", "valor", "nota")]
+
+    @app.callback(salidas, Input("latam-pais", "value"), Input("latam-periodo", "value"),
+                  Input("latam-indicador", "value"))
+    def actualizar_resumen_latam(pais, periodo, ind):
+        p0, p1 = periodo_efectivo(periodo, ind)
+        texto = texto_periodo(p0, p1).replace("–", "-")
         tabla = resumen_paises(latam, p0, p1)
         fila = tabla.loc[pais]
-        n = len(tabla)
+        n_paises = len(tabla)
+        ev = eventos_periodo(latam, p0, p1)
+        ev = ev[ev["pais"] == pais]
+        donde = con_articulo(pais)
 
         def puesto(col):
-            return f"Puesto {int((tabla[col] > fila[col]).sum()) + 1} de {n} países"
+            return f"Puesto {int((tabla[col] > fila[col]).sum()) + 1} de {n_paises} países"
 
-        antes = len(e[(e["pais"] == pais) & (e["anio"] <= CORTE_PERIODOS)])
-        despues = len(e[(e["pais"] == pais) & (e["anio"] > CORTE_PERIODOS)])
-        cambio = variacion_pct(despues, antes)
-        nota_eventos = [puesto("eventos")]
-        if cambio is not None:
-            nota_eventos = [html.Span(puesto("eventos")), html.Br(),
-                            html.Span(f"{'▲' if cambio > 0 else '▼'} {numero(abs(cambio), 0)} % en {CORTE_PERIODOS + 1}–{a1} "
-                                      f"vs {a0}–{CORTE_PERIODOS}", className="delta-sube" if cambio > 0 else "delta-baja")]
-        anio_pbi = int(latam["pbi"].loc[pais, "anio_pbi"])
-        salida = [pais, texto_periodo(p0, p1), f"Desastres naturales en {pais}, {texto_periodo(p0, p1)}",
-                  numero(fila["eventos"], 0), nota_eventos,
-                  numero(fila["fallecidos"], 0), puesto("fallecidos"),
-                  numero(fila["afectados"], 0), puesto("afectados"),
-                  numero(fila["dano_miles"] / 1000, 0), "Ajustado por inflación · " + puesto("dano_miles"),
-                  f"{numero(fila['costo_pbi'], 1)} %", f"Del PBI {anio_pbi} · " + puesto("costo_pbi")]
+        salida = [pais, texto_periodo(*periodo).replace("–", "-"), TEXTOS_LATAM[ind]["indicador"]]
+        if ind == "eventos":
+            salida += [f"Desastres naturales en {donde}, {texto}",
+                       f"¿Qué mide? {TEXTOS_LATAM[ind]['que_mide']} {n_paises} países de América Latina y el Caribe."]
+            antes = len(e[(e["pais"] == pais) & (e["anio"] <= CORTE_PERIODOS)])
+            despues = len(e[(e["pais"] == pais) & (e["anio"] > CORTE_PERIODOS)])
+            cambio = variacion_pct(despues, antes)
+            nota = [html.Span(puesto("eventos"))]
+            if cambio is not None:
+                nota += [html.Br(), html.Span(f"{antes} → {despues} ({con_signo(cambio, 1)} %) entre {a0}-{CORTE_PERIODOS} "
+                                              f"y {CORTE_PERIODOS + 1}-{a1}",
+                                              className="delta-sube" if cambio > 0 else "delta-baja")]
+            salida += ["Desastres registrados", numero(fila["eventos"], 0), nota]
+            total = max(len(ev), 1)
+            for sub in ORDEN_SUBGRUPOS_PAIS:
+                del_tipo = ev[ev["subgrupo"] == sub]
+                nota = f"{numero(len(del_tipo) / total * 100, 1)} % del total"
+                if len(del_tipo):
+                    principal = del_tipo["tipo"].value_counts()
+                    nota += f" · {nombre_corto(principal.index[0])} ({principal.iloc[0]})"
+                salida += [f"Desastres {sub.lower()}s", numero(len(del_tipo), 0), nota]
+        else:
+            pbi = latam["pbi"].loc[pais, "pbi_millones_usd"] * 1000
+            zona = zonas[pais]
+            promedio_zona = tabla.loc[tabla["zona"] == zona, "costo_pbi"].mean()
+            salida += [f"Costo económico de los desastres en {donde}, {texto}",
+                       f"¿Qué mide? {TEXTOS_LATAM[ind]['que_mide']}"]
+            nota = [html.Span(puesto("costo_pbi")), html.Br(),
+                    html.Span(f"US$ {numero(fila['dano_miles'] / 1000, 0)} millones · "
+                              f"promedio {en_zona.get(zona, 'en su zona')}: {numero(promedio_zona, 1)} %")]
+            salida += ["Costo económico", [numero(fila["costo_pbi"], 1), html.Span(" % del PBI", className="kpi-unidad")],
+                       nota]
+            total = fila["dano_miles"] or np.nan
+            for sub in ORDEN_SUBGRUPOS_PAIS:
+                del_tipo = ev[ev["subgrupo"] == sub]
+                costo = del_tipo["dano_miles_usd"].sum()
+                parte = 0 if es_vacio(total) else costo / total * 100
+                nota = f"{numero(parte, 1)} % del costo total"
+                if costo > 0:
+                    principal = del_tipo.groupby("tipo")["dano_miles_usd"].sum().sort_values(ascending=False)
+                    nota += f" · {nombre_corto(principal.index[0])}"
+                salida += [f"Costo de desastres {sub.lower()}s",
+                           [numero(costo / pbi * 100, 1), html.Span(" % del PBI", className="kpi-unidad")], nota]
         return salida
 
-    # Ranking, mapa, dos periodos, dispersión y evolución
-    @app.callback(Output("latam-graf-ranking", "figure"), Output("latam-graf-ranking-titulo", "children"),
-                  Output("latam-graf-mapa", "figure"), Output("latam-graf-mapa-titulo", "children"),
-                  Output("latam-graf-periodos", "figure"), Output("latam-graf-dispersion", "figure"),
-                  Output("latam-graf-dispersion-titulo", "children"), Output("latam-graf-evolucion", "figure"),
+    # Los 6 gráficos numerados (figura, título y unidad de cada uno)
+    @app.callback([Output(f"latam-graf-{n}{parte}", prop) for n in range(1, 7)
+                   for parte, prop in (("", "figure"), ("-titulo", "children"), ("-unidad", "children"))],
                   Input("latam-pais", "value"), Input("latam-periodo", "value"), Input("latam-indicador", "value"))
-    def actualizar_regional_latam(pais, periodo, ind):
-        p0, p1 = periodo
+    def actualizar_graficos_latam(pais, periodo, ind):
+        p0, p1 = periodo_efectivo(periodo, ind)
+        texto = texto_periodo(p0, p1).replace("–", "-")
         tabla = resumen_paises(latam, p0, p1)
-        titulo = f"{INDICADORES_LATAM[ind]} por país, {texto_periodo(p0, p1)}"
-        return (grafico_ranking_latam(tabla, pais, ind), titulo,
-                grafico_mapa_latam(tabla, pais, ind), f"Mapa: {INDICADORES_LATAM[ind].lower()}, {texto_periodo(p0, p1)}",
-                grafico_periodos_latam(latam, pais),
-                grafico_dispersion_latam(latam, p0, p1),
-                f"¿Más desastres, más costo? Región, {texto_periodo(p0, min(p1, ULTIMO_ANIO_COSTO))}",
-                grafico_evolucion_latam(latam, p0, p1, pais))
-
-    # Tipos de desastre: zona del país y el país elegido
-    @app.callback(Output("latam-graf-zona-eventos", "figure"), Output("latam-graf-zona-eventos-titulo", "children"),
-                  Output("latam-graf-zona-costo", "figure"), Output("latam-graf-zona-costo-titulo", "children"),
-                  Output("latam-graf-pais-eventos", "figure"), Output("latam-graf-pais-eventos-titulo", "children"),
-                  Output("latam-graf-pais-costo", "figure"), Output("latam-graf-pais-costo-titulo", "children"),
-                  Input("latam-pais", "value"), Input("latam-periodo", "value"))
-    def actualizar_tipos_latam(pais, periodo):
-        p0, p1 = periodo
         zona = zonas[pais]
-        en_zona = {"Sudamérica": "en Sudamérica", "Caribe": "en el Caribe"}.get(zona, "en México y Centroamérica")
-        texto = texto_periodo(p0, p1)
-        return (grafico_tipos_zona(latam, p0, p1, zona, pais, "eventos"),
-                f"Desastres según tipo de evento {en_zona}, {texto} (%)",
+        lugar = en_zona.get(zona, "en México y Centroamérica")
+        donde = con_articulo(pais)
+        if ind == "eventos":
+            return (grafico_ranking_latam(tabla, pais, ind), f"Número de desastres naturales, {texto}",
+                    "(N.º de desastres)",
+                    grafico_mapa_latam(tabla, pais, ind), f"Número de desastres, {texto}", "(N.º de desastres)",
+                    grafico_periodos_latam(latam, pais),
+                    f"Número de desastres naturales en países de América Latina y el Caribe, "
+                    f"{a0}-{CORTE_PERIODOS} y {CORTE_PERIODOS + 1}-{a1}", "(N.º de desastres; no depende del periodo)",
+                    grafico_tipos_zona(latam, p0, p1, zona, pais, "eventos"),
+                    f"Desastres naturales por tipo según su origen {lugar}, {texto}", "(% del total de desastres)",
+                    grafico_tipos_pais(latam, pais, p0, p1, "eventos"),
+                    f"Número de desastres registrados en {donde} por tipo y subtipo, {texto}", "(N.º de desastres)",
+                    grafico_anual_pais(latam, pais, p0, p1, "eventos"),
+                    f"Número anual de desastres en {donde} por tipo, {texto}",
+                    "(N.º de desastres y promedio móvil de 5 años)")
+        return (grafico_ranking_latam(tabla, pais, ind), f"Costo económico de los desastres, {texto}", "(% del PBI)",
+                grafico_mapa_latam(tabla, pais, ind), f"Costo económico, {texto}", "(% del PBI)",
+                grafico_dispersion_latam(latam, p0, p1),
+                f"Número anual de desastres y costo económico en América Latina y el Caribe, {texto}",
+                "(Miles de millones de US$)",
                 grafico_tipos_zona(latam, p0, p1, zona, pais, "costo"),
-                f"Costo económico según tipo de evento {en_zona}, {texto} (%)",
-                grafico_tipos_pais(latam, pais, p0, p1, "eventos"),
-                f"Desastres en {pais} por tipo y subtipo, {texto}",
+                f"Distribución del costo económico de los desastres por tipo según su origen {lugar}, {texto}",
+                "(% del costo total)",
                 grafico_tipos_pais(latam, pais, p0, p1, "costo"),
-                f"Costo de los desastres en {pais} por tipo y subtipo, {texto} (% del PBI)")
+                f"Costo de los desastres en {donde} por tipo y subtipo, {texto}", "(% del PBI)",
+                grafico_anual_pais(latam, pais, p0, p1, "costo"),
+                f"Costo económico anual de los desastres en {donde}, {texto}",
+                "(Millones de US$, ajustados por inflación)")
 
 
 def registrar_callbacks(app, base, geojson):
