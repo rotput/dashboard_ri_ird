@@ -151,25 +151,31 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto
 COLORES_CALIDOS = ["#f03b20", "#fd8d3c", "#fecc5c", "#ffffb2"]   # de más fuerte a más débil
 COLORES_FRIOS = ["#bdd7e7", "#6baed6", "#3182bd"]                # de más débil a más fuerte
 COLOR_NEUTRO = "#ffffff"
-# Cada índice: columna del Excel, nombre, decimales y criterio (tus tablas de "CRITERIO").
+# Cada índice: columna del Excel, nombre, decimales, definición y criterio (tus tablas de "CRITERIO").
+#   El ORDEN de esta lista es el orden de los filtros y de las tarjetas.
+#   definicion: texto del cuadro «Definición» (reemplázalo por el tuyo)
 #   calidas: (magnitud, umbral) de la más fuerte a la más débil -> cálida si valor > umbral
 #   frias:   (magnitud, umbral) de la más débil a la más fuerte -> fría si valor < umbral
 #   incluye_limite=True cuando el criterio usa ≥ y ≤ (como el MEI v2)
 INDICES_CLIMA = {
-    "LABCOS": {"columna": "LABCOS", "nombre": "Índice LABCOS", "decimales": 1, "decimales_criterio": 2,
-               "calidas": [("Muy fuerte", 2.77), ("Fuerte", 1.37), ("Moderada", 0.78), ("Débil", 0.27)],
-               "frias": [("Débil", -0.78), ("Moderada", -1.10), ("Fuerte", -1.31)]},
-    "ITCP": {"columna": "ITCP", "nombre": "Índice Térmico Costero Peruano", "decimales": 1,
-             "calidas": [("Cálida", 0.4)], "frias": [("Fría", -0.6)]},
     "ICEN": {"columna": "ICE", "nombre": "Índice Costero El Niño", "decimales": 2,
+             "definicion": "Definición pendiente: aquí va el texto del ICEN.",
              "calidas": [("Extraordinaria", 3.5), ("Fuerte", 2.1), ("Moderada", 1.3), ("Débil", 0.5)],
              "frias": [("Débil", -0.7), ("Moderada", -1.1), ("Fuerte", -1.3)]},
+    "ITCP": {"columna": "ITCP", "nombre": "Índice Térmico Costero Peruano", "decimales": 1,
+             "definicion": "Definición pendiente: aquí va el texto del ITCP.",
+             "calidas": [("Cálida", 0.4)], "frias": [("Fría", -0.6)]},
+    "LABCOS": {"columna": "LABCOS", "nombre": "Índice LABCOS", "decimales": 1, "decimales_criterio": 2,
+               "definicion": "Definición pendiente: aquí va el texto del LABCOS.",
+               "calidas": [("Muy fuerte", 2.77), ("Fuerte", 1.37), ("Moderada", 0.78), ("Débil", 0.27)],
+               "frias": [("Débil", -0.78), ("Moderada", -1.10), ("Fuerte", -1.31)]},
     # EHNOS: se usa el criterio del MEI v2 (±0,5). Si su criterio es otro, cámbialo aquí.
     "EHNOS": {"columna": "EHNOS", "nombre": "Índice EHNOS", "decimales": 2,
+              "definicion": "Definición pendiente: aquí va el texto del EHNOS.",
               "calidas": [("Cálida", 0.5)], "frias": [("Fría", -0.5)], "incluye_limite": True},
 }
-COLOR_CALIDO, COLOR_FRIO, COLOR_NEUTRO_GRIS = "#f03b20", "#3182bd", "#c9d6e3"
-MESES_VENTANA = 36       # meses que muestran "Variación a 12 meses" y "¿Coinciden los índices?"
+COLOR_CALIDO, COLOR_FRIO = "#f03b20", "#3182bd"
+FUENTE_CLIMA = ("Fuente: ENFEN. Los valores marcados con * en el Excel se muestran como preliminares.")
 
 # ---- Estadísticas de América Latina (archivo EMDAT_LATAM.xlsx, ya procesado) ---
 ARCHIVO_LATAM = os.path.join(CARPETA, "EMDAT_LATAM.xlsx")
@@ -983,16 +989,6 @@ def limites_neutro(cfg):
     return cfg["frias"][0][1], cfg["calidas"][-1][1]
 
 
-def grupo_clima(valor, cfg):
-    k = clasificar_clima(valor, cfg)
-    return None if k is None else segmentos_clima(cfg)[k]["grupo"]
-
-
-def ticks_semestrales(etiquetas, meses):
-    """Etiquetas del eje solo en enero y julio (para ejes por categoría)."""
-    return [e for e, m in zip(etiquetas, meses) if m in (1, 7)]
-
-
 def picos(serie, ventana, umbral, maximos=True, cuantos=3):
     """Meses que son el pico de su episodio (máximo o mínimo en ±ventana meses)."""
     s = serie if maximos else -serie
@@ -1076,79 +1072,7 @@ def grafico_evolucion_clima(clima, clave, idx):
     return fig
 
 
-# ---- 4.13 Variación a 12 meses (barras divergentes) --------------------------
-def variacion_12(clima, clave):
-    return clima[clave] - clima[clave].shift(12)
-
-
-def grafico_variacion12_clima(clima, clave, idx):
-    if idx < 12:
-        return figura_vacia("Se necesitan 12 meses previos para calcular la variación.")
-    dec = INDICES_CLIMA[clave]["decimales"]
-    cambio = variacion_12(clima, clave)
-    tramo = clima.loc[max(12, idx - MESES_VENTANA + 1):idx]
-    y = cambio.loc[tramo.index]
-    custom = [[e, valor_clima(clima.loc[i, clave], dec), clima.loc[i - 12, "etiqueta"],
-               valor_clima(clima.loc[i - 12, clave], dec), con_signo(round(c, dec) + 0.0, dec) if not es_vacio(c) else "—"]
-              for i, e, c in zip(tramo.index, tramo["etiqueta"], y)]
-    colores = [C["contexto"] if es_vacio(c) else (COLOR_CALIDO if c > 0 else COLOR_FRIO) for c in y]
-    fig = go.Figure(go.Bar(
-        x=tramo["etiqueta"], y=y, marker=dict(color=colores, opacity=[1 if i == idx else 0.5 for i in tramo.index]),
-        text=[f"<b>{con_signo(round(c, dec) + 0.0, dec)}</b>" if i == idx and not es_vacio(c) else ""
-              for i, c in zip(tramo.index, y)],
-        textposition="outside", cliponaxis=False, constraintext="none", textfont=dict(size=12, color=C["tinta"]),
-        customdata=custom,
-        hovertemplate="<b>%{customdata[0]}</b>: %{customdata[1]}<br>%{customdata[2]}: %{customdata[3]}"
-                      "<br>Cambio: <b>%{customdata[4]}</b><extra></extra>"))
-    fig.add_hline(y=0, line=dict(color=C["tinta_3"], width=1))
-    tope = np.nanmax(np.abs(y.to_numpy(dtype=float))) if y.notna().any() else 1
-    fig.update_layout(margin=dict(l=4, r=26, t=22, b=4), bargap=0.25, showlegend=False,
-                      xaxis=dict(type="category", tickvals=ticks_semestrales(tramo["etiqueta"], tramo["mes"]),
-                                 showline=False),
-                      yaxis=dict(title="Cambio vs. mismo mes del año anterior", range=[-tope * 1.25, tope * 1.25],
-                                 zeroline=False))
-    return fig
-
-
-# ---- 4.14 Hace un año vs. hoy (los cuatro índices) ---------------------------
-def grafico_anio_vs_hoy(clima, idx):
-    if idx < 12:
-        return figura_vacia("Se necesitan 12 meses previos para comparar.")
-    hoy, antes = clima.loc[idx], clima.loc[idx - 12]
-    claves = list(INDICES_CLIMA)[::-1]  # el primero queda arriba
-    fig = go.Figure()
-    for k in claves:
-        cfg = INDICES_CLIMA[k]
-        x0, x1 = antes[k], hoy[k]
-        if es_vacio(x0) or es_vacio(x1):
-            continue
-        sube = x1 > x0
-        fig.add_annotation(x=x1, y=k, ax=x0, ay=k, xref="x", yref="y", axref="x", ayref="y", text="",
-                           showarrow=True, arrowhead=2, arrowsize=1.1, arrowwidth=3, standoff=11,
-                           arrowcolor=hex_a_rgba(COLOR_CALIDO if sube else COLOR_FRIO, 0.75))
-        seg = segmentos_clima(cfg)[clasificar_clima(x1, cfg)]
-        fig.add_scatter(x=[x0], y=[k], mode="markers+text", text=[valor_clima(x0, cfg["decimales"])],
-                        textposition="bottom center", textfont=dict(size=11, color=C["tinta_3"]),
-                        marker=dict(size=14, color=C["superficie"], line=dict(color=C["tinta_3"], width=2)),
-                        showlegend=False, hovertemplate=f"<b>{k}</b> {antes['etiqueta']}: %{{x:.2f}}<extra></extra>")
-        fig.add_scatter(x=[x1], y=[k], mode="markers+text", text=[f"<b>{valor_clima(x1, cfg['decimales'])}</b>"],
-                        textposition="top center", textfont=dict(size=13, color=C["tinta"]),
-                        marker=dict(size=20, color=seg["color"], line=dict(color=C["tinta"], width=1.5)),
-                        showlegend=False,
-                        hovertemplate=f"<b>{k}</b> {hoy['etiqueta']}: %{{x:.2f}}<br>{seg['texto']}<extra></extra>")
-    fig.add_vline(x=0, line=dict(color=C["tinta_3"], width=1, dash="dot"), layer="below")
-    fig.add_scatter(x=[None], y=[None], mode="markers", name=antes["etiqueta"],
-                    marker=dict(size=12, color=C["superficie"], line=dict(color=C["tinta_3"], width=2)))
-    fig.add_scatter(x=[None], y=[None], mode="markers", name=f"{hoy['etiqueta']} (color de su categoría)",
-                    marker=dict(size=12, color=COLOR_CALIDO, line=dict(color=C["tinta"], width=1.5)))
-    fig.update_layout(margin=dict(l=4, r=12, t=36, b=4), legend=dict(y=1.04),
-                      xaxis=dict(title="Valor del índice", showgrid=True, gridcolor=C["rejilla"], zeroline=False),
-                      yaxis=dict(type="category", categoryorder="array", categoryarray=claves, showgrid=False,
-                                 tickfont=dict(size=13, color=C["tinta"])))
-    return fig
-
-
-# ---- 4.15 Cada año, mes a mes (estacionalidad) -------------------------------
+# ---- 4.13 Cada año, mes a mes (estacionalidad) -------------------------------
 def grafico_estacional_clima(clima, clave, idx):
     cfg = INDICES_CLIMA[clave]
     dec = cfg["decimales"]
@@ -1190,54 +1114,7 @@ def grafico_estacional_clima(clima, clave, idx):
     return fig
 
 
-# ---- 4.16 Los 10 meses más cálidos -------------------------------------------
-def grafico_top_clima(clima, clave, idx):
-    cfg = INDICES_CLIMA[clave]
-    segs, dec = segmentos_clima(cfg), cfg["decimales"]
-    top = clima[["etiqueta", clave]].dropna().nlargest(10, clave).iloc[::-1]
-    sel = clima.loc[idx, "etiqueta"]
-    colores = [segs[clasificar_clima(x, cfg)]["color"] for x in top[clave]]
-    fig = go.Figure(go.Bar(
-        y=top["etiqueta"], x=top[clave], orientation="h",
-        marker=dict(color=colores, line=dict(color=[C["tinta"] if e == sel else BORDE_MAPA for e in top["etiqueta"]],
-                                             width=[3 if e == sel else 0.6 for e in top["etiqueta"]])),
-        text=[valor_clima(x, dec) for x in top[clave]], textposition="outside", cliponaxis=False,
-        textfont=dict(size=11, color=C["tinta"]),
-        customdata=[segs[clasificar_clima(x, cfg)]["texto"] for x in top[clave]],
-        hovertemplate="<b>%{y}</b>: %{x:.2f}<br>%{customdata}<extra></extra>"))
-    fig.update_layout(margin=dict(l=4, r=4, t=8, b=4), bargap=0.2, showlegend=False,
-                      xaxis=dict(visible=False, range=[0, top[clave].max() * 1.15]),
-                      yaxis=dict(type="category", tickvals=list(top["etiqueta"]),
-                                 ticktext=[f"<b>{e}</b>" if e == sel else e for e in top["etiqueta"]],
-                                 tickfont=dict(size=11, color=C["tinta"]), showline=True, linecolor=C["borde"]))
-    return fig
-
-
-# ---- 4.17 ¿Coinciden los cuatro índices? (barras apiladas) -------------------
-def grafico_consenso_clima(clima, idx):
-    tramo = clima.loc[max(0, idx - MESES_VENTANA + 1):idx]
-    conteo = {"Condición cálida": [], "Neutro": [], "Condición fría": []}
-    for _, fila in tramo.iterrows():
-        grupos = [grupo_clima(fila[k], cfg) for k, cfg in INDICES_CLIMA.items()]
-        for g in conteo:
-            conteo[g].append(grupos.count(g))
-    fig = go.Figure()
-    for g, color, nombre in [("Condición cálida", COLOR_CALIDO, "Cálida"), ("Neutro", COLOR_NEUTRO_GRIS, "Neutro"),
-                             ("Condición fría", COLOR_FRIO, "Fría")]:
-        fig.add_bar(x=tramo["etiqueta"], y=conteo[g], name=nombre, marker=dict(color=color, line=dict(width=0)),
-                    hovertemplate=f"%{{x}}: %{{y}} índice(s) en condición {nombre.lower()}<extra></extra>")
-    pos = list(tramo.index).index(idx)
-    fig.add_shape(type="rect", x0=pos - 0.5, x1=pos + 0.5, y0=0, y1=len(INDICES_CLIMA), xref="x", yref="y",
-                  line=dict(color=C["tinta"], width=2.5), fillcolor="rgba(0,0,0,0)")
-    fig.update_layout(barmode="stack", bargap=0.12, margin=dict(l=4, r=4, t=36, b=4),
-                      legend=dict(y=1.04, traceorder="normal"),
-                      xaxis=dict(type="category", tickvals=ticks_semestrales(tramo["etiqueta"], tramo["mes"]),
-                                 showline=False),
-                      yaxis=dict(title="Número de índices", range=[0, len(INDICES_CLIMA)], dtick=1))
-    return fig
-
-
-# ---- 4.18 Calendario: año x mes en colores del criterio ----------------------
+# ---- 4.14 Calendario: año x mes en colores del criterio ----------------------
 def grafico_calendario_clima(clima, clave, idx):
     cfg = INDICES_CLIMA[clave]
     segs, dec = segmentos_clima(cfg), cfg["decimales"]
@@ -1269,7 +1146,7 @@ def grafico_calendario_clima(clima, clave, idx):
     return fig
 
 
-# ---- 4.19 Ranking de países (barras en colores de cuartil) --------------------
+# ---- 4.15 Ranking de países (barras en colores de cuartil) --------------------
 def grafico_ranking_latam(tabla, pais_sel, ind):
     datos = tabla.assign(q=cuartiles_latam(tabla[ind])).sort_values(ind)
     sel = datos.index == pais_sel
@@ -1289,7 +1166,7 @@ def grafico_ranking_latam(tabla, pais_sel, ind):
     return fig
 
 
-# ---- 4.20 Mapa de América Latina (cuartiles) ---------------------------------
+# ---- 4.16 Mapa de América Latina (cuartiles) ---------------------------------
 def grafico_mapa_latam(tabla, pais_sel, ind):
     datos = tabla.assign(q=cuartiles_latam(tabla[ind]))
     minimos = datos.groupby("q")[ind].min()
@@ -1320,7 +1197,7 @@ def grafico_mapa_latam(tabla, pais_sel, ind):
     return fig
 
 
-# ---- 4.21 Dos periodos: 1980-2002 vs 2003-2026 --------------------------------
+# ---- 4.17 Dos periodos: 1980-2002 vs 2003-2026 --------------------------------
 def grafico_periodos_latam(latam, pais_sel):
     e = latam["eventos"]
     antes = e[e["anio"] <= CORTE_PERIODOS].groupby("pais").size()
@@ -1343,7 +1220,7 @@ def grafico_periodos_latam(latam, pais_sel):
     return fig
 
 
-# ---- 4.22 Desastres y costo por año (dispersión con tendencia) ---------------
+# ---- 4.18 Desastres y costo por año (dispersión con tendencia) ---------------
 def grafico_dispersion_latam(latam, a0, a1):
     e = eventos_periodo(latam, a0, min(a1, ULTIMO_ANIO_COSTO))
     anual = e.groupby("anio").agg(n=("id", "size"), costo=("dano_miles_usd", "sum"))
@@ -1373,7 +1250,7 @@ def grafico_dispersion_latam(latam, a0, a1):
     return fig
 
 
-# ---- 4.23 Distribución por tipo de desastre en los países de una zona --------
+# ---- 4.19 Distribución por tipo de desastre en los países de una zona --------
 def grafico_tipos_zona(latam, a0, a1, zona, pais_sel, medida):
     e = eventos_periodo(latam, a0, a1)
     e = e[e["zona"] == zona]
@@ -1401,7 +1278,7 @@ def grafico_tipos_zona(latam, a0, a1, zona, pais_sel, medida):
     return fig
 
 
-# ---- 4.24 Un país: desastres o costo por tipo y subtipo ----------------------
+# ---- 4.20 Un país: desastres o costo por tipo y subtipo ----------------------
 def grafico_tipos_pais(latam, pais, a0, a1, medida):
     e = eventos_periodo(latam, a0, a1)
     e = e[e["pais"] == pais]
@@ -1426,7 +1303,7 @@ def grafico_tipos_pais(latam, pais, a0, a1, medida):
     return fig
 
 
-# ---- 4.25 Evolución anual en la región (por subgrupo) + el país elegido ------
+# ---- 4.21 Evolución anual en la región (por subgrupo) + el país elegido ------
 def grafico_evolucion_latam(latam, a0, a1, pais_sel):
     e = eventos_periodo(latam, a0, a1)
     tabla = e.pivot_table(index="anio", columns="subgrupo", values="id", aggfunc="count", fill_value=0)
@@ -1501,7 +1378,7 @@ def barra_lateral(departamentos, anios):
     marcas = {a: str(a) for a in anios if (a - anios[0]) % 5 == 0 and anios[-1] - a >= 3}
     marcas[anios[-1]] = str(anios[-1])
     return html.Aside(className="lateral", children=[
-        dcc.Link([icono("volver"), "Portada"], href="/", className="lateral-volver"),
+        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="lateral-volver"),
         html.Div(className="marca", children=[html.Span("IRD", className="marca-sigla"),
                                               html.Span(TITULO, className="marca-nombre")]),
         html.Div(className="seleccion", children=[html.Div(id="lateral-anio", className="seleccion-anio"),
@@ -1638,12 +1515,15 @@ def crear_layout(base):
 
 # ---- Página de índices climáticos ---------------------------------------------
 def barra_lateral_clima(clima):
-    n = len(clima)
-    marcas = {i: str(a) for i, (a, m) in enumerate(zip(clima["anio"], clima["mes"]))
-              if m == 1 and (a - clima["anio"].iloc[0]) % 4 == 0 and i < n - 30}
-    marcas[n - 1] = clima["etiqueta"].iloc[-1]
+    """Portada · año y mes elegidos · filtros (índice, año, mes) · fuente."""
+    anios = sorted(clima["anio"].unique())
+    a0, a1 = int(anios[0]), int(anios[-1])
+    marcas_anio = {a: str(a) for a in range(a0, a1 + 1) if (a - a0) % 4 == 0 and a1 - a >= 3}
+    marcas_anio[a1] = str(a1)
+    marcas_mes = {m: MESES[m - 1][0] for m in range(1, 13)}  # E F M A M J J A S O N D
+    ultimo = clima.iloc[-1]
     return html.Aside(className="lateral", children=[
-        dcc.Link([icono("volver"), "Portada"], href="/", className="lateral-volver"),
+        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="lateral-volver"),
         html.Div(className="marca", children=[html.Span("ICM", className="marca-sigla"),
                                               html.Span("Índices climáticos mensuales", className="marca-nombre")]),
         html.Div(className="seleccion", children=[html.Div(id="clima-lateral-anio", className="seleccion-anio"),
@@ -1652,14 +1532,17 @@ def barra_lateral_clima(clima):
             html.Label([icono("indicador"), "Índice"], className="control-etiqueta"),
             dcc.RadioItems(id="clima-indice", value=list(INDICES_CLIMA)[0], className="control-radio",
                            options=[{"label": k, "value": k} for k in INDICES_CLIMA]),
+            html.Label([icono("calendario"), "Año"], className="control-etiqueta"),
+            dcc.Slider(id="clima-anio", min=a0, max=a1, step=1, value=int(ultimo["anio"]), marks=marcas_anio,
+                       included=False, tooltip={"placement": "bottom", "always_visible": False}),
             html.Div(className="control-fila", children=[
                 html.Label([icono("calendario"), "Mes"], className="control-etiqueta"),
                 html.Button("▶ Reproducir", id="clima-btn-play", n_clicks=0, className="boton-play")]),
-            dcc.Slider(id="clima-mes", min=0, max=n - 1, step=1, value=n - 1, marks=marcas, included=False),
-            html.Button(f"Ir al último mes ({clima['etiqueta'].iloc[-1]})", id="clima-btn-ultimo",
+            dcc.Slider(id="clima-mes", min=1, max=12, step=1, value=int(ultimo["mes"]), marks=marcas_mes,
+                       included=False),
+            html.Button(f"Ir al último mes ({ultimo['etiqueta']})", id="clima-btn-ultimo",
                         n_clicks=0, className="boton-secundario")]),
-        html.P("Consejo: haz clic en una tarjeta para ver ese índice, o en el calendario para elegir un mes.",
-               className="lateral-nota"),
+        html.P(FUENTE_CLIMA, className="lateral-fuente"),
         dcc.Interval(id="clima-intervalo", interval=700, disabled=True, n_intervals=0),
     ])
 
@@ -1697,55 +1580,47 @@ def tabla_criterio(clave):
     return html.Table(className="criterio", children=[cabecera, html.Tbody(filas)])
 
 
+def panel_definicion():
+    """Cuadro con la definición del índice y su criterio (tabla)."""
+    return html.Section(className="panel area-definicion", children=[
+        html.Header(className="panel-cabecera", children=[
+            html.Div([html.Span(icono("ranking"), className="panel-icono"),
+                      html.H3(id="clima-definicion-titulo")], className="panel-titulo")]),
+        html.H4("Definición", className="subtitulo-panel"),
+        html.P(id="clima-definicion", className="definicion-texto"),
+        html.H4("Criterio", className="subtitulo-panel"),
+        html.Div(id="clima-criterio", className="criterio-contenedor")])
+
+
 def crear_layout_clima(clima):
+    """Orden de la página:
+         título
+         tarjetas (ICEN, ITCP, LABCOS, EHNOS)
+         [Definición y criterio] [Evolución]
+         [Cada año, mes a mes]   [Calendario]"""
     primero, ultimo = clima["etiqueta"].iloc[0], clima["etiqueta"].iloc[-1]
     cabecera = html.Header(className="cabecera", children=[
         html.H1(id="clima-titulo"),
         html.P(f"Condición del mar según cuatro índices mensuales, {primero} – {ultimo}",
                className="cabecera-sub")])
-    criterio = html.Section(className="panel area-criterio", children=[
-        html.Header(className="panel-cabecera", children=[
-            html.Div([html.Span(icono("ranking"), className="panel-icono"),
-                      html.H3(id="clima-criterio-titulo")], className="panel-titulo"),
-            html.P("Rangos con los que se clasifica cada mes.", className="panel-descripcion")]),
-        html.Div(id="clima-criterio", className="criterio-contenedor")])
-    fila_evolucion = html.Div(className="fila fila-historia", children=[
+    fila_1 = html.Div(className="fila fila-2", children=[
+        panel_definicion(),
         panel("clima-graf-evolucion", "Evolución del índice",
               "Rojo: por encima de cero (más cálido de lo normal). Azul: por debajo. Las líneas punteadas son "
               "los umbrales del criterio. Clic en la línea para elegir un mes.",
-              area="evolucion", alto=440, icono_panel="tendencia"),
-        criterio])
-    fila_variacion = html.Div(className="fila fila-2", children=[
-        panel("clima-graf-variacion", "Variación a 12 meses",
-              "Diferencia entre cada mes y el mismo mes del año anterior. Rojo: se calentó; azul: se enfrió.",
-              area="variacion12", alto=400, icono_panel="subebaja"),
-        panel("clima-graf-anio", "Hace un año vs. hoy",
-              "Valor de cada índice hace 12 meses (gris) y ahora (color de su categoría). "
-              "Clic en un índice para elegirlo.",
-              area="anio", alto=400, icono_panel="flecha")])
-    fila_estacional = html.Div(className="fila fila-2", children=[
+              area="evolucion", alto=440, icono_panel="tendencia")])
+    fila_2 = html.Div(className="fila fila-2", children=[
         panel("clima-graf-estacional", "Cada año, mes a mes",
               "Cada línea es un año, de enero a diciembre. Resaltados: el año elegido (azul) y el año con el "
               "valor más alto (rojo). La franja gris es el rango neutro.",
-              area="estacional", alto=440, icono_panel="ola"),
-        panel("clima-graf-top", "Los 10 meses más cálidos",
-              "Meses con el valor más alto desde 2010, con el color de su categoría. "
-              "El mes elegido va con borde oscuro.",
-              area="top", alto=440, icono_panel="ranking")])
-    fila_consenso = html.Div(className="fila fila-2", children=[
-        panel("clima-graf-consenso", "¿Coinciden los cuatro índices?",
-              f"Cuántos índices marcan condición cálida, neutra o fría en cada uno de los últimos "
-              f"{MESES_VENTANA} meses. Clic en una barra para elegir ese mes.",
-              area="consenso", alto=470, icono_panel="barras"),
+              area="estacional", alto=470, icono_panel="ola"),
         panel("clima-graf-calendario", "Calendario del índice",
               "Cada celda es un mes, con el color de su categoría. Clic en una celda para elegir ese mes.",
               area="calendario", alto=470, icono_panel="cuadricula")])
     contenido = html.Main(className="contenido", children=[
         cabecera,
         html.Section(className="clima-tarjetas", children=[tarjeta_clima(k) for k in INDICES_CLIMA]),
-        fila_evolucion, fila_variacion, fila_estacional, fila_consenso,
-        html.Footer(className="pie", children=[html.P(
-            "Fuente: ICEM.xlsx. Los valores marcados con * en el Excel se muestran como preliminares.")]),
+        fila_1, fila_2,
     ])
     return html.Div(className="app", children=[barra_lateral_clima(clima), contenido])
 
@@ -1767,7 +1642,7 @@ def barra_lateral_latam(latam):
     marcas[a1] = str(a1)
     paises = sorted(latam["eventos"]["pais"].unique())
     return html.Aside(className="lateral", children=[
-        dcc.Link([icono("volver"), "Portada"], href="/", className="lateral-volver"),
+        dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="lateral-volver"),
         html.Div(className="marca", children=[html.Span("LAT", className="marca-sigla"),
                                               html.Span("Estadísticas de América Latina", className="marca-nombre")]),
         html.Div(className="seleccion", children=[html.Div(id="latam-lateral-pais", className="seleccion-pais"),
@@ -2003,11 +1878,14 @@ display:grid;place-items:center;flex:none}
 .rc-slider-mark-text{font-size:11px;color:var(--tinta-3)!important}
 .rc-slider-handle{border-color:var(--pacifico-medio)!important}
 
-/* Enlace a la portada (barra lateral del IRD) */
-.lateral-volver{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;color:#9fcbf2;
-font-size:13px;font-weight:600;text-decoration:none;margin-bottom:-6px}
-.lateral-volver:hover{color:#fff}
-.lateral-volver .icono{width:16px;height:16px}
+/* Botón «Volver a la portada» (barra lateral de los tres tableros) */
+.lateral-volver{display:flex;align-items:center;justify-content:center;gap:9px;color:#fff;font-size:15px;
+font-weight:650;text-decoration:none;padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.14);
+border:1px solid rgba(255,255,255,.38);transition:background .2s ease}
+.lateral-volver:hover{background:rgba(255,255,255,.26)}
+.lateral-volver .icono{width:19px;height:19px}
+.lateral-fuente{margin-top:auto;font-size:12.5px;line-height:1.45;color:rgba(255,255,255,.75);
+border-top:1px solid rgba(255,255,255,.2);padding-top:12px}
 
 /* Portada */
 .portada{min-height:100vh;display:flex;flex-direction:column}
@@ -2076,8 +1954,10 @@ transition:border-color .2s ease,box-shadow .2s ease}
 color:var(--tinta);background:var(--niebla);border:1px solid var(--borde);border-radius:999px;padding:3px 12px}
 .clima-estado .criterio-color{margin-right:0}
 .clima-delta{text-align:center}
-.fila-historia{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
-.criterio-contenedor{margin-top:10px;overflow-x:auto}
+.subtitulo-panel{margin-top:14px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+color:var(--pacifico-medio)}
+.definicion-texto{margin-top:6px;font-size:14px;line-height:1.55;color:var(--tinta)}
+.criterio-contenedor{margin-top:6px;overflow-x:auto}
 .criterio{width:100%;border-collapse:collapse;font-size:13.5px}
 .criterio th{text-align:left;font-size:12px;font-weight:700;color:var(--pacifico);text-transform:uppercase;
 letter-spacing:.04em;padding:8px 8px;border-bottom:2px solid var(--borde)}
@@ -2109,7 +1989,6 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 /* Pantallas medianas */
 @media (max-width:1280px){
 .clima-tarjetas{grid-template-columns:repeat(2,minmax(0,1fr))}
-.fila-historia{grid-template-columns:minmax(0,1fr)}
 .latam-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
 .fila-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
 .fila-3{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -2192,47 +2071,51 @@ def registrar_callbacks_clima(app, clima):
     ultimo = len(clima) - 1
     posicion = {(a, m): i for i, (a, m) in enumerate(zip(clima["anio"], clima["mes"]))}
     por_fecha = {f.strftime("%Y-%m"): i for i, f in enumerate(clima["fecha"])}
-    por_etiqueta = {e: i for i, e in enumerate(clima["etiqueta"])}
-    graficos_clic = ["clima-graf-calendario", "clima-graf-evolucion", "clima-graf-variacion", "clima-graf-anio",
-                     "clima-graf-estacional", "clima-graf-top", "clima-graf-consenso"]
 
-    # Clics en tarjetas y gráficos, reproducir y último mes -> índice y mes
-    @app.callback(Output("clima-indice", "value"), Output("clima-mes", "value"),
+    def ubicar(anio, mes):
+        """Fila del mes elegido; si ese mes aún no tiene dato, el último mes con dato de ese año."""
+        if (anio, mes) in posicion:
+            return posicion[(anio, mes)]
+        meses = clima.index[clima["anio"] == anio]
+        return int(meses[-1]) if len(meses) else ultimo
+
+    def a_filtros(i):
+        return int(clima.loc[i, "anio"]), int(clima.loc[i, "mes"])
+
+    # Tarjetas, clics en gráficos, reproducir, último mes y año/mes -> índice, año y mes
+    @app.callback(Output("clima-indice", "value"), Output("clima-anio", "value"), Output("clima-mes", "value"),
                   [Input(f"clima-tarjeta-{k}", "n_clicks") for k in claves]
-                  + [Input(g, "clickData") for g in graficos_clic]
-                  + [Input("clima-intervalo", "n_intervals"), Input("clima-btn-ultimo", "n_clicks")],
-                  State("clima-mes", "value"), prevent_initial_call=True)
+                  + [Input("clima-graf-calendario", "clickData"), Input("clima-graf-evolucion", "clickData"),
+                     Input("clima-graf-estacional", "clickData"), Input("clima-intervalo", "n_intervals"),
+                     Input("clima-btn-ultimo", "n_clicks"), Input("clima-anio", "value"), Input("clima-mes", "value")],
+                  prevent_initial_call=True)
     def sincronizar_clima(*args):
-        mes_actual = args[-1]
+        anio, mes = args[-2], args[-1]
         origen = ctx.triggered_id
         clic = ctx.triggered[0]["value"] if ctx.triggered else None
         puntos = (clic or {}).get("points") if isinstance(clic, dict) else None
         punto = puntos[0] if puntos else {}
 
-        def mes(i):
-            return i if i is not None else no_update
+        def ir_a(i):
+            return (no_update,) + a_filtros(i) if i is not None else (no_update, no_update, no_update)
 
         if isinstance(origen, str) and origen.startswith("clima-tarjeta-"):
-            return origen.replace("clima-tarjeta-", ""), no_update
+            return origen.replace("clima-tarjeta-", ""), no_update, no_update
         if origen == "clima-btn-ultimo":
-            return no_update, ultimo
+            return ir_a(ultimo)
         if origen == "clima-intervalo":
-            return no_update, (mes_actual + 1 if mes_actual < ultimo else 0)
+            i = ubicar(anio, mes)
+            return ir_a(i + 1 if i < ultimo else 0)
         if origen == "clima-graf-calendario":
-            return no_update, mes(posicion.get((punto.get("y"), punto.get("x"))))
+            return ir_a(posicion.get((punto.get("y"), punto.get("x"))))
         if origen == "clima-graf-evolucion":
-            return no_update, mes(por_fecha.get(str(punto.get("x", ""))[:7]))
-        if origen in ("clima-graf-variacion", "clima-graf-consenso"):
-            return no_update, mes(por_etiqueta.get(punto.get("x")))
-        if origen == "clima-graf-top":
-            return no_update, mes(por_etiqueta.get(punto.get("y")))
+            return ir_a(por_fecha.get(str(punto.get("x", ""))[:7]))
         if origen == "clima-graf-estacional":
             custom = punto.get("customdata") or [None]
-            return no_update, mes(posicion.get((custom[0], punto.get("x"))))
-        if origen == "clima-graf-anio":
-            clave = punto.get("y")
-            return (clave if clave in INDICES_CLIMA else no_update), no_update
-        return no_update, no_update
+            return ir_a(posicion.get((custom[0], punto.get("x"))))
+        if origen in ("clima-anio", "clima-mes") and (anio, mes) not in posicion:
+            return ir_a(ubicar(anio, mes))  # mes sin dato: se pasa al último mes disponible
+        return no_update, no_update, no_update
 
     @app.callback(Output("clima-intervalo", "disabled"), Output("clima-btn-play", "children"),
                   Input("clima-btn-play", "n_clicks"), State("clima-intervalo", "disabled"),
@@ -2249,8 +2132,9 @@ def registrar_callbacks_clima(app, clima):
                     Output(f"clima-estado-{k}", "children"), Output(f"clima-delta-{k}", "children"),
                     Output(f"clima-tarjeta-{k}", "className")]
 
-    @app.callback(salidas, Input("clima-mes", "value"), Input("clima-indice", "value"))
-    def actualizar_tarjetas_clima(idx, clave_sel):
+    @app.callback(salidas, Input("clima-anio", "value"), Input("clima-mes", "value"), Input("clima-indice", "value"))
+    def actualizar_tarjetas_clima(anio, mes, clave_sel):
+        idx = ubicar(anio, mes)
         fila = clima.loc[idx]
         previa = clima.loc[idx - 1] if idx > 0 else None
         nombre_mes = MESES[fila["mes"] - 1]
@@ -2283,44 +2167,19 @@ def registrar_callbacks_clima(app, clima):
                        "clima-tarjeta activa" if k == clave_sel else "clima-tarjeta"]
         return salida
 
-    # Evolución, criterio, variación a 12 meses y hace un año vs. hoy
-    @app.callback(Output("clima-graf-evolucion", "figure"), Output("clima-graf-evolucion-titulo", "children"),
-                  Output("clima-criterio", "children"), Output("clima-criterio-titulo", "children"),
-                  Output("clima-graf-variacion", "figure"), Output("clima-graf-variacion-titulo", "children"),
-                  Output("clima-graf-anio", "figure"), Output("clima-graf-anio-titulo", "children"),
-                  Input("clima-mes", "value"), Input("clima-indice", "value"))
-    def actualizar_evolucion_clima(idx, clave):
-        cfg = INDICES_CLIMA[clave]
-        fila = clima.loc[idx]
-        titulo_var = f"Variación a 12 meses del {clave}"
-        if idx >= 12:
-            cambio = variacion_12(clima, clave).loc[idx]
-            if not es_vacio(cambio):
-                titulo_var += (f": {con_signo(round(cambio, cfg['decimales']) + 0.0, cfg['decimales'])} "
-                               f"({clima.loc[idx - 12, 'etiqueta']} → {fila['etiqueta']})")
-        titulo_anio = (f"Hace un año vs. hoy: {clima.loc[idx - 12, 'etiqueta']} → {fila['etiqueta']}"
-                       if idx >= 12 else "Hace un año vs. hoy")
-        return (grafico_evolucion_clima(clima, clave, idx), f"Evolución del {clave} ({cfg['nombre']})",
-                tabla_criterio(clave), f"Criterio del {clave}",
-                grafico_variacion12_clima(clima, clave, idx), titulo_var,
-                grafico_anio_vs_hoy(clima, idx), titulo_anio)
-
-    # Estacionalidad, top 10, coincidencia de índices y calendario
-    @app.callback(Output("clima-graf-estacional", "figure"), Output("clima-graf-estacional-titulo", "children"),
-                  Output("clima-graf-top", "figure"), Output("clima-graf-top-titulo", "children"),
-                  Output("clima-graf-consenso", "figure"),
+    # Definición y criterio, evolución, cada año mes a mes y calendario
+    @app.callback(Output("clima-definicion-titulo", "children"), Output("clima-definicion", "children"),
+                  Output("clima-criterio", "children"),
+                  Output("clima-graf-evolucion", "figure"), Output("clima-graf-evolucion-titulo", "children"),
+                  Output("clima-graf-estacional", "figure"), Output("clima-graf-estacional-titulo", "children"),
                   Output("clima-graf-calendario", "figure"), Output("clima-graf-calendario-titulo", "children"),
-                  Input("clima-mes", "value"), Input("clima-indice", "value"))
-    def actualizar_patrones_clima(idx, clave):
-        fila = clima.loc[idx]
-        serie = clima[clave].dropna()
-        titulo_top = f"Los 10 meses más cálidos del {clave}"
-        if not es_vacio(fila[clave]):
-            puesto = int((serie > fila[clave]).sum()) + 1
-            titulo_top += f" · {fila['etiqueta']}: puesto {puesto} de {len(serie)}"
-        return (grafico_estacional_clima(clima, clave, idx), f"Cada año, mes a mes: {clave}",
-                grafico_top_clima(clima, clave, idx), titulo_top,
-                grafico_consenso_clima(clima, idx),
+                  Input("clima-anio", "value"), Input("clima-mes", "value"), Input("clima-indice", "value"))
+    def actualizar_graficos_clima(anio, mes, clave):
+        idx = ubicar(anio, mes)
+        cfg = INDICES_CLIMA[clave]
+        return (f"{clave}: {cfg['nombre']}", cfg.get("definicion", ""), tabla_criterio(clave),
+                grafico_evolucion_clima(clima, clave, idx), f"Evolución del {clave}",
+                grafico_estacional_clima(clima, clave, idx), f"Cada año, mes a mes: {clave}",
                 grafico_calendario_clima(clima, clave, idx), f"Calendario del {clave}")
 
 
