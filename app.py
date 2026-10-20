@@ -233,7 +233,7 @@ SUBCOMPONENTES_INFORM = {   # Gráfico 6: (dimensión, nombre)
 }
 # Clases del INFORM (umbrales de la clase de riesgo del Excel) y sus colores
 CLASES_INFORM = [  # (nombre, desde, color)
-    ("Muy bajo", 0.0, "#FBF7CF"), ("Bajo", 2.35, "#F2F089"), ("Intermedio", 3.55, "#FD8D3C"),
+    ("Muy bajo", 0.0, "#FBF7CF"), ("Bajo", 2.35, "#F2F089"), ("Medio", 3.55, "#FD8D3C"),
     ("Alto", 5.35, "#E31A1C"), ("Muy alto", 6.75, "#800026")]
 # Los 21 países de América Latina y el Caribe del Gráfico N.º 10 de la presentación
 PAISES_INFORM = {
@@ -1958,7 +1958,7 @@ def crear_layout_inform(inform):
                "Belice y Surinam.")
     fila_1 = html.Div(className="fila fila-2", children=[grafico(1, 480, nota_21), grafico(2, 480)])
     fila_2 = html.Div(className="fila fila-2", children=[
-        grafico(3, 380, "INFORM 2026 clasifica al Perú (4,9) en la categoría «Medium» (intermedio)."),
+        grafico(3, 380, "INFORM 2026 clasifica al Perú (4,9) en la categoría «Medium» (Medio)."),
         grafico(4, 380, "riesgo de cada amenaza natural en una escala de 0 a 10.")])
     fila_3 = html.Div(className="fila fila-2", children=[
         grafico(5, 500, "INFORM Risk = (Amenaza y exposición)^1/3 × (Vulnerabilidad)^1/3 × "
