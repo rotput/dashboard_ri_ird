@@ -148,7 +148,7 @@ INDICES_CLIMA = {
                "frias": [("Débil", -0.78), ("Moderada", -1.10), ("Fuerte", -1.31)]},
     # EHNOS: se usa el criterio del MEI v2 (±0,5). Si su criterio es otro, cámbialo aquí.
     "EHNOS": {"columna": "EHNOS", "nombre": "Índice EHNOS", "decimales": 2, "unidad": "°C",
-              "definicion": ("Índice asociado al ENOS (El Niño-Oscilación del Sur), un fenómeno climático que combina "
+              "definicion": ("Índice asociado al EHNOS (El Niño-Oscilación del Sur), un fenómeno climático que combina "
                              "variaciones del océano y la atmósfera en el Pacífico tropical y cuyos efectos pueden "
                              "extenderse a distintas regiones del mundo."),
               "calidas": [("Cálida", 0.5)], "frias": [("Fría", -0.5)], "incluye_limite": True},
