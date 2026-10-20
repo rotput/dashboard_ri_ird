@@ -2050,8 +2050,8 @@ background:linear-gradient(180deg,#0b3a66 0%,#0a2f54 100%);
 padding:24px 22px 22px;display:flex;flex-direction:column;gap:16px}
 .lateral-volver{display:flex;align-items:center;justify-content:center;gap:9px;color:#fff;font-size:15px;
 font-weight:650;text-decoration:none;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.14);
-border:1px solid rgba(255,255,255,.38);transition:background .2s ease}
-.lateral-volver:hover{background:rgba(255,255,255,.26)}
+border:1px solid rgba(255,255,255,.55);transition:background .2s ease}
+.lateral-volver:hover{background:rgba(255,255,255,.40)}
 .lateral-volver .icono{width:19px;height:19px}
 .selector-indices{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:12px;
 background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2)}
