@@ -7,13 +7,14 @@
 #    /indice-desastres     Índice de Desastres (ID)          <- IRD_RESULTADO.xlsx
 #    /inform-risk          Índice INFORM Risk                <- inform.xlsx
 #    /latam                Estadísticas de América Latina    <- EMDAT_LATAM.xlsx
-#    /estimacion-costos    Estimación de costos de desastres    <- BASE_FEN_CONSOLIDADA.xlsx + fen_motor.py
+#    /estimacion-costos    Estimación de costos de desastres    <- BASE_FEN_CONSOLIDADA.xlsx
 #  Archivos junto a app.py: ICEM.xlsx, IRD_RESULTADO.xlsx, inform.xlsx, EMDAT_LATAM.xlsx,
-#                           BASE_FEN_CONSOLIDADA.xlsx, fen_motor.py y portada.jpg
+#                           BASE_FEN_CONSOLIDADA.xlsx, portada.jpg y (opcional) fen_cache.pkl
+#  En Render, comando de inicio:  gunicorn app:server --preload --timeout 180
 #
 #  Pega todo en UNA celda de JupyterLab y ejecútala. Se abre en: http://127.0.0.1:8050
 #  Librerías (una sola vez, en otra celda):
-#      !pip install -U dash plotly pandas openpyxl scipy matplotlib
+#      !pip install -U dash plotly pandas openpyxl
 #
 #  Secciones:
 #    1. CONFIGURACIÓN   -> archivos, colores, textos y definiciones (cambia aquí)
@@ -27,6 +28,7 @@
 #    7. EJECUTAR
 # =============================================================================
 
+import hashlib
 import json
 import math
 import os
@@ -209,7 +211,6 @@ FUENTE_INFORM = "Fuente: Comisión Europea (2026), INFORM Risk. Elaboración: DR
 INDICADORES_INFORM = {
     "INFORM RISK": "INFORM Risk",
     "HAZARD & EXPOSURE": "Amenaza y exposición",
-    "Natural": "Amenazas naturales",
     "VULNERABILITY": "Vulnerabilidad",
     "LACK OF COPING CAPACITY": "Falta de capacidad de respuesta",
 }
@@ -291,9 +292,10 @@ COLOR_PERIODO_1, COLOR_PERIODO_2 = "#7F7F7F", "#C00000"
 COLOR_DISPERSION, COLOR_TENDENCIA = "#0B2A5B", "#C00000"
 
 
-# ---- 1.7 Estimación de costos de desastres naturales (fen_motor.py + BASE_FEN_CONSOLIDADA.xlsx) -----
-# El modelo se estima con fen_motor.py al abrir el tablero (unos 20 s la primera vez). El resultado se guarda en
-# ARCHIVO_CACHE_FEN para que las siguientes veces abra al instante; si cambias la base, se vuelve a estimar solo.
+# ---- 1.7 Estimación de costos de desastres naturales (BASE_FEN_CONSOLIDADA.xlsx) ----------------------
+# El modelo (el mismo de fen_motor.py, copiado en la sección 3.6) se estima al abrir el tablero: unos 20 s la
+# primera vez. El resultado se guarda en fen_cache.pkl y las siguientes veces abre al instante; si cambias la
+# base, se vuelve a estimar solo. Puedes subir fen_cache.pkl a GitHub para que el servidor no tenga que estimar.
 ARCHIVO_FEN = os.path.join(CARPETA, "BASE_FEN_CONSOLIDADA.xlsx")
 ARCHIVO_CACHE_FEN = os.path.join(CARPETA, "fen_cache.pkl")
 FORMA_FEN = "lin_lluv"                      # forma del efecto del ICEN (la elegida por validación)
@@ -660,50 +662,59 @@ def porcentaje_corto(v):
 
 
 # ---- 3.5 Estimación de costos (simulador) ----------------------------------------------
+COSTOS_ERROR = ""   # si la estimación falla, aquí queda el motivo (se muestra en la página)
+
+
+def firma_costos():
+    """Huella de la base y de la configuración: si cambia, se vuelve a estimar el modelo."""
+    with open(ARCHIVO_FEN, "rb") as archivo:
+        contenido = hashlib.md5(archivo.read()).hexdigest()
+    return f"{contenido}-{FORMA_FEN}-{SIMULADOR_DESDE}-{SIMULADOR_HASTA}-{SORTEOS_FEN}"
+
+
 def cargar_costos():
-    """Estima el modelo con fen_motor.py (o lo lee de la caché) y arma un modelo por sector para el simulador.
-    Si falta la base o fen_motor.py, devuelve None (la página queda «En preparación»)."""
+    """Lee el modelo de la caché (fen_cache.pkl) o lo estima con BASE_FEN_CONSOLIDADA.xlsx.
+    Si falta la base o algo falla, devuelve None y la página explica el motivo."""
+    global COSTOS_ERROR
     if not os.path.exists(ARCHIVO_FEN):
+        COSTOS_ERROR = f"No se encontró {os.path.basename(ARCHIVO_FEN)} junto a app.py."
         return None
-    firma = (f"{os.path.getsize(ARCHIVO_FEN)}-{int(os.path.getmtime(ARCHIVO_FEN))}-{FORMA_FEN}-"
-             f"{SIMULADOR_DESDE}-{SIMULADOR_HASTA}-{SORTEOS_FEN}")
     try:
-        with open(ARCHIVO_CACHE_FEN, "rb") as archivo:
-            guardado = pickle.load(archivo)
-        if guardado.get("firma") == firma:
-            return guardado
-    except (OSError, pickle.PickleError, EOFError, AttributeError):
-        pass
-    if CARPETA not in sys.path:   # fen_motor.py está junto a app.py
-        sys.path.insert(0, CARPETA)
-    try:
-        import fen_motor as FM
-    except ImportError:
+        firma = firma_costos()
+        try:
+            with open(ARCHIVO_CACHE_FEN, "rb") as archivo:
+                guardado = pickle.load(archivo)
+            if guardado.get("firma") == firma:
+                return guardado
+        except Exception:   # caché ausente o de otra versión de pandas/numpy: se vuelve a estimar
+            pass
+        costos = preparar_costos()
+        costos["firma"] = firma
+        try:
+            with open(ARCHIVO_CACHE_FEN, "wb") as archivo:
+                pickle.dump(costos, archivo)
+        except OSError:
+            pass
+        return costos
+    except Exception as error:
+        COSTOS_ERROR = f"No se pudo estimar el modelo: {type(error).__name__}: {error}"
         return None
-    costos = preparar_costos(FM)
-    costos["firma"] = firma
-    try:
-        with open(ARCHIVO_CACHE_FEN, "wb") as archivo:
-            pickle.dump(costos, archivo)
-    except OSError:
-        pass
-    return costos
 
 
-def preparar_costos(FM):
+def preparar_costos():
     """Lee la base, estima el modelo (total y 7 sectores) y separa sus piezas:
     costo = exp(parte fija de cada zona y mes + coeficientes del ICEN × ICEN)."""
-    base = FM.cargar_base(ARCHIVO_FEN)
+    base = cargar_base_fen(ARCHIVO_FEN)
     pm = base["pm"]
-    mod = FM.estimar(pm, FORMA_FEN)
+    mod = estimar_fen(pm, FORMA_FEN)
     periodos = [str(p) for p in pd.period_range(SIMULADOR_DESDE, SIMULADOR_HASTA, freq="M")]
     cero = {p: 0.0 for p in periodos}
     rng = np.random.default_rng(20261015)
     modelos = {}
-    for clave, nombre in [("total", "Total")] + [(s, FM.NOMBRE_SECTOR[s]) for s in FM.SECTORES]:
+    for clave, nombre in [("total", "Total")] + list(SECTORES_FEN.items()):
         fit = mod[clave]
-        filas = FM.filas_escenario(pm, None, cero)
-        X = FM.diseno_nuevo(fit, filas)
+        filas = filas_escenario(pm, None, cero)
+        X = diseno_nuevo(fit, filas)
         ic = [fit.nombres.index(c) for c in fit.clima]
         io = [j for j in range(len(fit.nombres)) if j not in ic]
         celdas = set(fit.D["zona"] + "·" + fit.D["mes"].astype(str))
@@ -721,12 +732,11 @@ def preparar_costos(FM):
             "tipos": [c.split("_", 1)[0] for c in fit.clima], "beta": fit.beta[ic],
             "sorteos": rng.multivariate_normal(fit.beta[ic], V, size=SORTEOS_FEN, method="eigh", check_valid="ignore")}
     # Temporadas pasadas (oct-set): costo observado de cada mes, total y por sector
-    obs = pm[pm["temporada"].isin(FM.TEMPORADAS)]
+    obs = pm[pm["temporada"].isin(TEMPORADAS_FEN)]
     historico = obs.groupby(["temporada", "mes"]).agg(
-        Total=("costo_total_caf", "sum"), **{FM.NOMBRE_SECTOR[s]: (f"costo_{s}_caf", "sum") for s in FM.SECTORES})
-    historico = historico.reset_index().merge(
-        base["temporadas"][["temporada", "icen_max_dic_abr"]].rename(columns={"icen_max_dic_abr": "icen_max"}),
-        on="temporada")
+        Total=("costo_total_caf", "sum"), **{nombre: (f"costo_{s}_caf", "sum") for s, nombre in SECTORES_FEN.items()})
+    historico = historico.reset_index()
+    historico["icen_max"] = historico["temporada"].map(base["icen_max"])
     inicial = {p: float(base["trayectoria"].get(p, 0.0)) for p in periodos}
     return {"info": {"mes_base_soles": base["mes_base"], "forma": FORMA_FEN, "unidades": int(pm["unidad"].nunique()),
                      "panel_desde": str(pm["periodo"].min()), "panel_hasta": str(pm["periodo"].max())},
@@ -816,6 +826,340 @@ def mes_texto(periodo):
 def temporada_texto(temporada):
     """2017 -> '2016-17'"""
     return f"{int(temporada) - 1}-{str(int(temporada))[-2:]}"
+
+
+# ---- 3.6 Motor del modelo FEN (copiado de fen_motor.py; así app.py no necesita otro archivo) -----------
+# PPML de panel: efectos fijos de unidad y de zona × mes, tendencia por zona, control de registro e ICEN
+# cálido y frío por macrozona. Mismo modelo de FEN_replica.py.
+ZONAS_FEN = ["costa_norte", "costa_centro", "costa_sur", "sierra_norte", "sierra_centro", "sierra_sur", "selva"]
+SECTORES_FEN = {"vivienda": "Vivienda", "educacion": "Educación (locales escolares)",
+                "salud": "Salud (establecimientos)", "carreteras": "Carreteras y caminos rurales",
+                "puentes": "Puentes", "cultivos": "Cultivos (agricultura)", "pecuario": "Ganado"}
+TEMPORADAS_FEN = list(range(2004, 2026))          # temporadas completas oct-set 2003-04 ... 2024-25
+Z = ZONAS_FEN
+TEMPORADAS = TEMPORADAS_FEN
+
+
+def disenar(df: pd.DataFrame, continuas: list[str], efectos: list[str | tuple]) -> tuple[np.ndarray, list[str]]:
+    """Matriz X = [intercepto, continuas, dummies de efectos fijos (sin la primera categoría)].
+    Un efecto fijo puede ser una columna o una tupla de columnas (interacción)."""
+    cols, nombres = [np.ones(len(df))], ["const"]
+    for c in continuas:
+        cols.append(df[c].to_numpy(dtype=float))
+        nombres.append(c)
+    for e in efectos:
+        if isinstance(e, tuple):
+            key = df[list(e)].astype(str).agg("·".join, axis=1)
+            nom = "·".join(e)
+        else:
+            key = df[e].astype(str)
+            nom = e
+        cats = pd.Categorical(key)
+        codes = cats.codes
+        for j, cat in enumerate(cats.categories[1:], start=1):
+            cols.append((codes == j).astype(float))
+            nombres.append(f"FE[{nom}={cat}]")
+    return np.column_stack(cols), nombres
+
+
+def quitar_separados(y: np.ndarray, grupos: list[np.ndarray]) -> np.ndarray:
+    """Para Poisson con efectos fijos: elimina observaciones de grupos cuyo y es todo cero
+    (separación; Correia, Guimarães y Zylkin 2019). Devuelve máscara de observaciones válidas."""
+    ok = np.ones(len(y), dtype=bool)
+    cambio = True
+    while cambio:
+        cambio = False
+        for g in grupos:
+            s = pd.Series(y[ok]).groupby(g[ok]).transform("sum").to_numpy()
+            mal = s <= 0
+            if mal.any():
+                idx = np.where(ok)[0][mal]
+                ok[idx] = False
+                cambio = True
+    return ok
+
+
+class Ajuste:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def coef(self, nombre):
+        return self.beta[self.nombres.index(nombre)]
+
+
+def _familia(fam, alpha=0.0):
+    if fam == "poisson":
+        return (lambda mu: mu), (lambda mu: mu)                          # V(mu), peso IRLS = mu^2/V
+    if fam == "gamma":
+        return (lambda mu: mu ** 2), (lambda mu: np.ones_like(mu))
+    if fam == "nb2":
+        return (lambda mu: mu + alpha * mu ** 2), (lambda mu: mu / (1 + alpha * mu))
+    raise ValueError(fam)
+
+
+def ajustar(y, X, familia="poisson", nombres=None, alpha=0.0, beta0=None, maxit=200, tol=1e-10, offset=None):
+    """IRLS con enlace log (poisson, gamma o nb2)."""
+    y = np.asarray(y, float)
+    off = np.zeros(len(y)) if offset is None else np.asarray(offset, float)
+    n, k = X.shape
+    V, Wf = _familia(familia, alpha)
+    if beta0 is None:
+        beta = np.zeros(k)
+        beta[0] = np.log(max(np.mean(y), 1e-12))
+    else:
+        beta = beta0.copy()
+    dev_old = devianza(y, np.exp(np.clip(X @ beta + off, -50, 50)), familia, alpha)
+    for it in range(maxit):
+        eta = np.clip(X @ beta + off, -50, 50)
+        mu = np.exp(eta)
+        w = Wf(mu)
+        z = eta - off + (y - mu) / mu
+        XtW = X.T * w
+        A = XtW @ X
+        try:
+            b_new = np.linalg.solve(A + 1e-12 * np.eye(k), XtW @ z)
+        except np.linalg.LinAlgError:
+            b_new = np.linalg.lstsq(A, XtW @ z, rcond=None)[0]
+        # paso amortiguado si la deviance sube
+        # paso amortiguado: se reduce a la mitad mientras la deviance no baje (IRLS monótono)
+        d_eta = X @ (b_new - beta)
+        paso = min(1.0, 5.0 / max(np.max(np.abs(d_eta)), 1e-12))     # no mover η más de 5 por iteración
+        b_try = beta + paso * (b_new - beta)
+        dev = devianza(y, np.exp(np.clip(X @ b_try + off, -50, 50)), familia, alpha)
+        while (not np.isfinite(dev) or dev > dev_old + 1e-9 * abs(dev_old)) and paso > 1e-6:
+            paso /= 2
+            b_try = beta + paso * (b_new - beta)
+            dev = devianza(y, np.exp(np.clip(X @ b_try + off, -50, 50)), familia, alpha)
+        b_new = b_try
+        conv = abs(dev_old - dev) / (abs(dev) + 0.1) < tol
+        beta, dev_old = b_new, dev
+        if conv:
+            break
+    eta = np.clip(X @ beta + off, -50, 50)
+    mu = np.exp(eta)
+    w = Wf(mu)
+    H = (X.T * w) @ X
+    u = (y - mu) * mu / V(mu)                     # score_i = x_i * u_i
+    fit = Ajuste(beta=beta, mu=mu, eta=eta, u=u, H=H, X=X, y=y, nombres=nombres or [f"x{j}" for j in range(k)],
+                 familia=familia, dev=dev_old, iter=it + 1, alpha=alpha)
+    if familia == "gamma":
+        fit.phi = float(np.sum(((y - mu) / mu) ** 2) / max(n - k, 1))
+    return fit
+
+
+def devianza(y, mu, familia, alpha=0.0):
+    mu = np.clip(mu, 1e-300, None)
+    if familia == "poisson":
+        t = np.where(y > 0, y * np.log(np.where(y > 0, y, 1) / mu), 0.0)
+        return float(2 * np.sum(t - (y - mu)))
+    if familia == "gamma":
+        return float(2 * np.sum(-np.log(y / mu) + (y - mu) / mu))
+    if familia == "nb2":
+        a = alpha
+        t1 = np.where(y > 0, y * np.log(np.where(y > 0, y, 1) / mu), 0.0)
+        t2 = (y + 1 / a) * np.log((1 + a * y) / (1 + a * mu))
+        return float(2 * np.sum(t1 - t2))
+    raise ValueError(familia)
+
+
+def _Hinv(fit):
+    return np.linalg.pinv(fit.H)
+
+
+def vcov_hc(fit):
+    S = (fit.X.T * fit.u ** 2) @ fit.X
+    Hi = _Hinv(fit)
+    return Hi @ S @ Hi
+
+
+def vcov_cluster(fit, grupos):
+    g = pd.Categorical(grupos).codes
+    G = g.max() + 1
+    sc = fit.X * fit.u[:, None]
+    h = np.zeros((G, sc.shape[1]))
+    np.add.at(h, g, sc)
+    S = h.T @ h * G / (G - 1)
+    Hi = _Hinv(fit)
+    fit.gl_cl = G - 1
+    return Hi @ S @ Hi
+
+
+def vcov_dk(fit, tiempo, L=None):
+    """Driscoll-Kraay (1998): suma los scores de todas las unidades en cada período y aplica
+    Newey-West (Bartlett) sobre el tiempo. Robusto a choques comunes (el ICEN es el mismo para
+    todas las unidades en un mes) y a autocorrelación."""
+    tcodes = pd.Categorical(tiempo, ordered=True).codes
+    T = tcodes.max() + 1
+    if L is None:
+        L = int(np.floor(4 * (T / 100) ** (2 / 9)))
+    sc = fit.X * fit.u[:, None]
+    h = np.zeros((T, sc.shape[1]))
+    np.add.at(h, tcodes, sc)
+    S = h.T @ h
+    for l in range(1, L + 1):
+        G = h[l:].T @ h[:-l]
+        S += (1 - l / (L + 1)) * (G + G.T)
+    Hi = _Hinv(fit)
+    fit.L_dk = L
+    return Hi @ S @ Hi
+
+
+def robustecer(fit, tiempo=None, cluster=None, L=None):
+    fit.V_hc = vcov_hc(fit)
+    if tiempo is not None:
+        fit.V_dk = vcov_dk(fit, tiempo, L)
+    if cluster is not None:
+        fit.V_cl = vcov_cluster(fit, cluster)
+    return fit
+
+
+def agregar_clima(D: pd.DataFrame, forma: str = "lin", tau: float | None = None, var: str = "ICEN",
+                  extra: str | None = None, zonas=Z, pref="") -> list[str]:
+    """Agrega columnas de clima por zona y devuelve sus nombres.
+    forma='lin'      : parte cálida (índice+) y parte fría (índice−).
+    forma='lin_lluv' : parte cálida separada en meses de lluvia (dic-abr, 'cal_') y meses secos ('cas_'), y parte fría.
+    forma='log'      : log(1 + índice+) y parte fría."""
+    x = D[var]
+    xp, xn = x.clip(lower=0), (-x).clip(lower=0)
+    if forma == "log":
+        xp = np.log1p(xp)
+    cols = []
+    for z in zonas:
+        m = (D["zona"] == z).astype(float)
+        if forma == "lin_lluv":
+            D[f"{pref}cal_{z}"] = xp * m * D["lluvioso"]
+            D[f"{pref}cas_{z}"] = xp * m * (1 - D["lluvioso"])
+            cols += [f"{pref}cal_{z}", f"{pref}cas_{z}"]
+        else:
+            D[f"{pref}cal_{z}"] = xp * m
+            cols.append(f"{pref}cal_{z}")
+        D[f"{pref}fri_{z}"] = xn * m
+        cols.append(f"{pref}fri_{z}")
+        if extra:
+            D[f"{pref}ext_{z}"] = D[extra] * m
+            cols.append(f"{pref}ext_{z}")
+    return cols
+
+
+def agregar_tendencias(D: pd.DataFrame, zonas=Z) -> list[str]:
+    for z in zonas:
+        D[f"tend_{z}"] = D["t"] * (D["zona"] == z)
+    return [f"tend_{z}" for z in zonas]
+
+
+def ppml_panel(pm: pd.DataFrame, y: str = "costo_total_caf", forma="lin", tau=None, var="ICEN", extra=None,
+               efectos=("unidad", ("zona", "mes")), tendencias=True, registro=True, cl=True):
+    D = pm.copy()
+    clima = agregar_clima(D, forma, tau, var, extra)
+    cont = clima + (agregar_tendencias(D) if tendencias else []) + (["log_registro"] if registro else [])
+    yv = D[y].to_numpy(dtype=float)
+    ok = np.isfinite(yv) & D[cont].notna().all(axis=1).to_numpy()
+    D, yv = D[ok].reset_index(drop=True), yv[ok]
+    grupos = [D[e].astype(str).to_numpy() if not isinstance(e, tuple) else D[list(e)].astype(str).agg("·".join, axis=1).to_numpy()
+              for e in efectos]
+    ok = quitar_separados(yv, grupos)
+    D, yv = D[ok].reset_index(drop=True), yv[ok]
+    X, nm = disenar(D, cont, list(efectos))
+    keep = X.any(axis=0)
+    keep[0] = True
+    X, nm = X[:, keep], [n for n, k in zip(nm, keep) if k]
+    clima = [c for c in clima if c in nm]
+    fit = ajustar(yv, X, "poisson", nm)
+    robustecer(fit, tiempo=D["periodo"].astype(str).to_numpy(), cluster=D["temporada"].to_numpy() if cl else None)
+    fit.D, fit.clima, fit.cont, fit.efectos, fit.yname = D, clima, cont, efectos, y
+    fit.forma, fit.tau, fit.var, fit.extra = forma, tau, var, extra
+    fit.tendencias, fit.registro = tendencias, registro
+    return fit
+
+
+def loso_cv(pm, forma="lin", tau=None, var="ICEN", extra=None, temporadas=TEMPORADAS, y="costo_total_caf"):
+    """Validación cruzada dejando fuera una temporada completa: deviance Poisson fuera de muestra y
+    error del total nacional de la temporada (en log)."""
+    full = ppml_panel(pm, y, forma, tau, var, extra, cl=False)
+    D, X, b0 = full.D, full.X, full.beta
+    yv = full.y
+    dev, lr, filas = 0.0, [], []
+    for h in temporadas:
+        tr = (D["temporada"] != h).to_numpy()
+        te = ~tr
+        if te.sum() == 0:
+            continue
+        keep = X[tr].any(axis=0)
+        keep[0] = True
+        fh = ajustar(yv[tr], X[tr][:, keep], "poisson", beta0=b0[keep])
+        m = np.exp(np.clip(X[te][:, keep] @ fh.beta, -50, 50))
+        dev += devianza(yv[te], m, "poisson")
+        lr.append(np.log(m.sum() / yv[te].sum()))
+        filas.append({"temporada": h, "observado": yv[te].sum(), "predicho_fuera_de_muestra": m.sum()})
+    return {"dev_cv": dev, "rmse_log": float(np.sqrt(np.mean(np.square(lr)))), "sesgo_log": float(np.mean(lr)),
+            "detalle": pd.DataFrame(filas), "dev_in": full.dev}
+
+
+def filas_escenario(pm: pd.DataFrame, ind: pd.DataFrame, trayectoria: dict, enos: float | dict | None = None,
+                    base_temporada: int = 2025) -> pd.DataFrame:
+    """Una fila por unidad × mes de la trayectoria, con la tendencia y el registro de la temporada base."""
+    base = pm[pm["temporada"] == base_temporada][["unidad", "dpto", "region", "zona", "mes", "t", "log_registro"]]
+    out = []
+    for per, icen in trayectoria.items():
+        per = pd.Period(per, "M")
+        r = base[base["mes"] == per.month].copy()
+        r["periodo"] = per
+        r["ICEN"] = float(icen)
+        r["lluvioso"] = float(per.month in (12, 1, 2, 3, 4))
+        if enos is not None:
+            r["ENOS"] = float(enos[str(per)] if isinstance(enos, dict) else enos)
+        out.append(r)
+    return pd.concat(out, ignore_index=True)
+
+
+def diseno_nuevo(fit, Dn: pd.DataFrame) -> np.ndarray:
+    """Construye X para filas nuevas con exactamente las columnas del modelo estimado."""
+    Dn = Dn.copy()
+    agregar_clima(Dn, fit.forma, fit.tau, fit.var, fit.extra)
+    if fit.tendencias:
+        agregar_tendencias(Dn)
+    X = np.zeros((len(Dn), len(fit.nombres)))
+    claves = {}
+    for j, n in enumerate(fit.nombres):
+        if n == "const":
+            X[:, j] = 1.0
+        elif n.startswith("FE["):
+            k, v = n[3:-1].split("=", 1)
+            if k not in claves:
+                cols = k.split("·")
+                claves[k] = Dn[cols].astype(str).agg("·".join, axis=1).to_numpy() if len(cols) > 1 else Dn[k].astype(str).to_numpy()
+            X[:, j] = (claves[k] == v).astype(float)
+        else:
+            X[:, j] = Dn[n].to_numpy(dtype=float)
+    return X
+
+
+
+def cargar_base_fen(ruta):
+    """Lee de BASE_FEN_CONSOLIDADA.xlsx el panel mensual, la trayectoria del ICEN y el mes de los precios."""
+    H = pd.read_excel(ruta, sheet_name=["panel_mes", "supuestos_proyeccion", "ipc"])
+    pm = H["panel_mes"]
+    pm["periodo"] = pd.PeriodIndex(pm["periodo"].astype(str), freq="M")
+    sup = H["supuestos_proyeccion"]
+    fila = sup.index[sup.iloc[:, 0].astype(str) == "periodo"][0]
+    sup = sup.iloc[fila + 1:, :2].dropna()
+    trayectoria = {str(p).strip(): float(v) for p, v in sup.itertuples(index=False)}
+    obs = pm[pm["periodo"] <= pd.Period("2025-12", "M")]
+    max_mes = obs.groupby("mes")["ICEN"].max()
+    cuando = obs.loc[obs.groupby("mes")["ICEN"].idxmax(), ["mes", "periodo"]].set_index("mes")["periodo"].astype(str)
+    icen_max = (pm[pm["temporada"].isin(TEMPORADAS_FEN) & pm["mes"].isin([12, 1, 2, 3, 4])]
+                .groupby("temporada")["ICEN"].max())
+    return {"pm": pm, "trayectoria": trayectoria, "max_mes": max_mes, "cuando_max": cuando, "icen_max": icen_max,
+            "mes_base": str(H["ipc"]["periodo"].iloc[-1])}
+
+
+def estimar_fen(pm, forma):
+    """Modelo del costo total y de cada sector, y el error típico de una temporada (validación dejando una fuera)."""
+    modelos = {"total": ppml_panel(pm, forma=forma)}
+    for s in SECTORES_FEN:
+        modelos[s] = ppml_panel(pm, y=f"costo_{s}_caf", forma=forma, cl=False)
+    modelos["sigma"] = loso_cv(pm, forma)["rmse_log"]
+    return modelos
 
 
 # =============================================================================
@@ -2217,7 +2561,7 @@ def barra_lateral_id(base):
     ])
 
 
-def tarjeta_media_luna(id_base, sigla, nombre, nombre_icono="medidor", alto=165, destacada=False, color=None):
+def tarjeta_media_luna(id_base, sigla, nombre, nombre_icono="medidor", alto=140, destacada=False, color=None):
     """Tarjeta con velocímetro en media luna (como las de los índices climáticos).
     ids: <id_base>-titulo, <id_base>-graf, <id_base>-valor, <id_base>-nota"""
     estilo = {"borderTop": f"4px solid {color}"} if color else {}
@@ -2238,12 +2582,18 @@ def fila_kpis_id():
     principal = tarjeta_media_luna("id-kpi-0", "ID", "Índice de Desastres (0 a 10)", "medidor", destacada=True)
     frecuencia = tarjeta_media_luna("id-kpi-1", "Frecuencia", "De los desastres (0 a 1)", "alerta")
     severidad = tarjeta_media_luna("id-kpi-2", "Severidad", "De los daños (0 a 1)", "casa")
-    pilares = [tarjeta_media_luna(f"id-kpi-{i}", p["tarjeta"], "0 a 1", p["icono"], alto=95, color=p["color"])
+    pilares = [html.Div(className="kpi-pilar", style={"borderLeft": f"4px solid {p['color']}"}, children=[
+                   html.Div(className="kpi-pilar-cabeza", children=[
+                       html.Span(icono(p["icono"]), className="kpi-pilar-icono", style={"color": p["color"]}),
+                       html.Span(p["tarjeta"], className="kpi-pilar-nombre")]),
+                   html.Div(id=f"id-kpi-{i}-valor", className="kpi-pilar-valor"),
+                   html.Div(id=f"id-kpi-{i}-nota", className="kpi-pilar-nota")])
                for i, p in enumerate(PILARES.values(), start=3)]
     return html.Div(className="bloque-kpis", children=[
-        html.Section(className="fila-kpis-id", children=[
-            principal, frecuencia,
-            html.Div(className="kpi-grupo", children=[severidad, html.Div(className="kpi-pilares", children=pilares)])]),
+        html.Section(className="kpis-4", children=[   # mismo tamaño que las tarjetas del INFORM Risk
+            principal, frecuencia, severidad,
+            html.Div(className="kpi-pilares", children=[
+                html.P("Pilares de la severidad", className="kpi-pilares-titulo")] + pilares)]),
         html.P([html.Strong("Nota: "), NOTA_ESCALAS_ID, " Los colores son los cuartiles de los departamentos en el año."],
                className="nota-escala")])
 
@@ -2253,8 +2603,8 @@ def crear_layout_id(base):
        · [G3 evolución | G4 relación] · [G5 mapa de calor]"""
     cabecera = cabecera_pagina("", "Índice de Desastres (ID)", DEFINICION_ID)
     fila_1 = html.Div(className="fila fila-2", children=[
-        panel("id-graf-1", "", "id-1", alto=500, numero_grafico=1, fuente=FUENTE_ID),
-        panel("id-graf-2", "", "id-2", alto=500, numero_grafico=2, fuente=FUENTE_ID)])
+        panel("id-graf-1", "", "id-1", alto=470, numero_grafico=1, fuente=FUENTE_ID),
+        panel("id-graf-2", "", "id-2", alto=470, numero_grafico=2, fuente=FUENTE_ID)])
     fila_2 = html.Div(className="fila fila-2", children=[
         panel("id-graf-3", "", "id-3", alto=420, numero_grafico=3, fuente=FUENTE_ID),
         panel("id-graf-4", "", "id-4", alto=420, numero_grafico=4, fuente=FUENTE_ID,
@@ -2310,10 +2660,10 @@ def crear_layout_inform(inform):
 
     nota_21 = ("21 países: no se incluyen Puerto Rico e Islas Caimán (no tienen puntaje INFORM) ni Jamaica, "
                "Belice y Surinam.")
-    fila_1 = html.Div(className="fila fila-2", children=[grafico(1, 480, nota_21), grafico(2, 480)])
+    fila_1 = html.Div(className="fila fila-2", children=[grafico(1, 460, nota_21), grafico(2, 460)])
     fila_2 = html.Div(className="fila fila-2", children=[
-        grafico(3, 560, "INFORM 2026 clasifica al Perú (4,9) en la categoría «Medium» (Medio)."),
-        grafico(4, 560, "a mayor puntaje, mayor riesgo en los tres componentes.")])
+        grafico(3, 400, "INFORM 2026 clasifica al Perú (4,9) en la categoría «Medium» (Medio)."),
+        grafico(4, 400, "a mayor puntaje, mayor riesgo en los tres componentes.")])
     contenido = html.Main(className="contenido", children=[cabecera, tarjetas_inform(), fila_1, fila_2])
     return html.Div(className="app", children=[barra_lateral_inform(inform), contenido])
 
@@ -2588,16 +2938,19 @@ margin-bottom:6px}
 min-width:0;display:flex;flex-direction:column;gap:4px;box-shadow:var(--sombra)}
 .kpi-luna.activa{border-color:var(--pacifico-medio);background:linear-gradient(180deg,#f3f8fd 0%,#fff 55%)}
 .kpi-luna .clima-valor strong{font-size:24px}
-.kpi-grupo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:10px}
-.kpi-pilares{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.kpi-pilares .kpi-luna{padding:8px 8px 6px;gap:2px}
-.kpi-pilares .clima-sigla{font-size:13px}
-.kpi-pilares .clima-nombre{display:none}
-.kpi-pilares .kpi-icono{width:28px;height:28px}
-.kpi-pilares .kpi-icono .icono{width:16px;height:16px}
-.kpi-pilares .clima-valor strong{font-size:18px}
-.kpi-pilares .clase-chip{font-size:10.5px;padding:0 7px}
-.kpi-pilares .kpi-delta{font-size:11px;min-height:0}
+.kpi-grupo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.kpi-pilares{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto 1fr 1fr;gap:8px;
+background:var(--superficie);border:1px solid var(--borde);border-radius:var(--radio);padding:10px;box-shadow:var(--sombra)}
+.kpi-pilares-titulo{grid-column:1/3;font-size:13px;font-weight:750;color:var(--azul-ppt)}
+.kpi-pilar{padding:8px 10px;border-radius:10px;background:var(--niebla);min-width:0}
+.kpi-pilar-cabeza{display:flex;align-items:center;gap:6px}
+.kpi-pilar-icono{display:grid;place-items:center}
+.kpi-pilar-icono .icono{width:16px;height:16px}
+.kpi-pilar-nombre{font-size:12.5px;font-weight:700;color:var(--azul-ppt);line-height:1.2}
+.kpi-pilar-valor{margin-top:4px;font-size:15px;color:var(--tinta)}
+.kpi-pilar-valor strong{font-size:20px;font-weight:800;color:var(--azul-ppt);font-variant-numeric:tabular-nums}
+.kpi-pilar-valor .clase-chip{font-size:10.5px;padding:0 7px}
+.kpi-pilar-nota{font-size:11.5px;line-height:1.3}
 .kpis-4{display:grid;gap:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
 .kpis-6{display:grid;gap:14px;grid-template-columns:repeat(6,minmax(0,1fr))}
 .kpi{background:var(--superficie);border:1px solid var(--borde);border-radius:var(--radio);padding:14px 16px 12px;min-width:0;
@@ -2866,7 +3219,10 @@ def registrar_navegacion(app, clima, base_id, inform, latam, costos):
         if ruta == RUTA_COSTOS and costos is not None:
             return crear_layout_costos(costos)
         if ruta in secciones:
-            return pagina_en_preparacion(secciones[ruta])
+            seccion = dict(secciones[ruta])
+            if ruta == RUTA_COSTOS and COSTOS_ERROR:   # muestra por qué no se pudo cargar
+                seccion["descripcion"] = f"{seccion['descripcion']} — {COSTOS_ERROR}"
+            return pagina_en_preparacion(seccion)
         return crear_portada(clima, base_id, inform, latam, costos)
 
     # Al cambiar de página, empezar desde arriba
@@ -3058,8 +3414,9 @@ def registrar_callbacks_id(app, base, geojson):
     columnas = [COL_ID, COL_FREC, COL_SEV] + [p["columna"] for p in PILARES.values()]
     salidas = [Output("id-lateral-anio", "children"), Output("id-lateral-dpto", "children"),
                Output("id-kpi-0-titulo", "children")]
-    salidas += [Output(f"id-kpi-{i}-{parte}", prop) for i in range(len(columnas))
+    salidas += [Output(f"id-kpi-{i}-{parte}", prop) for i in range(3)
                 for parte, prop in (("graf", "figure"), ("valor", "children"), ("nota", "children"))]
+    salidas += [Output(f"id-kpi-{i}-{parte}", "children") for i in range(3, len(columnas)) for parte in ("valor", "nota")]
 
     @app.callback(salidas, Input("id-dpto", "value"), Input("id-anio", "value"))
     def actualizar_resumen_id(dpto, anio):
@@ -3074,10 +3431,8 @@ def registrar_callbacks_id(app, base, geojson):
             cortes = [float(c) for c in clases_cuartil(del_anio[col], METODO_CUARTIL_ID)[1]]
             valor, previo = serie[col].get(anio), serie[col].get(anio - 1)
             cuartil = 1 + sum(valor >= c for c in cortes) if not es_vacio(valor) else 1
-            chico = i >= 3
             figura = grafico_media_luna(valor, [0] + cortes + [tope], [COLORES_CUARTIL[q] for q in (1, 2, 3, 4)],
-                                        etiquetas=["", "", "", ""] if chico else None,
-                                        extremos=("", "") if chico else ("BAJO", "ALTO"), decimales=dec)
+                                        extremos=("BAJO", "ALTO"), decimales=dec)
             chip = html.Span(f"Cuartil {cuartil}", className="clase-chip",
                              style={"background": COLORES_CUARTIL[cuartil],
                                     "color": "#fff" if cuartil >= 3 else C["tinta"]})
@@ -3093,7 +3448,7 @@ def registrar_callbacks_id(app, base, geojson):
                 nota += [html.Br(), f"{numero(serie[COL_INCIDENCIAS].get(anio), 0)} incidencias registradas"]
             elif col == COL_SEV:
                 nota += [html.Br(), "Promedio de sus 4 pilares (25 % cada uno)"]
-            salida += [figura, valor_html, nota]
+            salida += [figura, valor_html, nota] if i < 3 else [valor_html, nota]   # pilares: solo el dato
         return salida
 
     # Los 5 gráficos numerados (figura, título y unidad)
