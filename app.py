@@ -7,17 +7,18 @@
 #    /indice-desastres     Índice de Desastres (ID)          <- IRD_RESULTADO.xlsx
 #    /inform-risk          Índice INFORM Risk                <- inform.xlsx
 #    /latam                Estadísticas de América Latina    <- EMDAT_LATAM.xlsx
-#    /estimacion-costos    Estimación de costos (en preparación)
-#  Archivos junto a app.py: ICEM.xlsx, IRD_RESULTADO.xlsx, inform.xlsx, EMDAT_LATAM.xlsx y portada.jpg
+#    /estimacion-costos    Estimación de costos de desastres    <- BASE_FEN_CONSOLIDADA.xlsx + fen_motor.py
+#  Archivos junto a app.py: ICEM.xlsx, IRD_RESULTADO.xlsx, inform.xlsx, EMDAT_LATAM.xlsx,
+#                           BASE_FEN_CONSOLIDADA.xlsx, fen_motor.py y portada.jpg
 #
 #  Pega todo en UNA celda de JupyterLab y ejecútala. Se abre en: http://127.0.0.1:8050
 #  Librerías (una sola vez, en otra celda):
-#      !pip install -U dash plotly pandas openpyxl
+#      !pip install -U dash plotly pandas openpyxl scipy matplotlib
 #
 #  Secciones:
 #    1. CONFIGURACIÓN   -> archivos, colores, textos y definiciones (cambia aquí)
 #         1.1 General   1.2 Portada   1.3 Índices climáticos   1.4 Índice de Desastres (ID)
-#         1.5 INFORM Risk   1.6 América Latina
+#         1.5 INFORM Risk   1.6 América Latina   1.7 Estimación de costos
 #    2. FORMATO         -> números y textos
 #    3. DATOS           -> lectura de los Excel y cálculos (mismo orden que la sección 1)
 #    4. GRÁFICOS        -> una función por gráfico (mismo orden)
@@ -29,6 +30,8 @@
 import json
 import math
 import os
+import pickle
+import sys
 import urllib.parse
 import urllib.request
 
@@ -75,8 +78,7 @@ CLAVE_GEOJSON = "properties.NOMBDEP"
 
 # ---- 1.2 Portada ------------------------------------------------------------------
 # "lista": True = el tablero ya funciona; False = muestra "En preparación".
-TITULO_PORTADA = "Seguimiento de Índices de Desastres"
-ANTETITULO_PORTADA = "Perú · Gestión del riesgo de desastres"
+TITULO_PORTADA = "Seguimiento de Indicadores e Índices de Desastres"
 SUBTITULO_PORTADA = ("Tableros para seguir las amenazas climáticas, los índices de desastres, "
                      "la situación de América Latina y el costo de los desastres.")
 ARCHIVO_PORTADA = "portada.jpg"      # imagen de fondo de la portada (junto a app.py)
@@ -101,10 +103,11 @@ SECCIONES = [
      "descripcion": "Frecuencia, costo económico y tipo de los desastres naturales en 26 países "
                     "de la región.",
      "etiquetas": ["EM-DAT", "Frecuencia", "Costo % PBI"]},
-    {"ruta": RUTA_COSTOS, "icono": "moneda", "lista": False,
-     "titulo": "Estimación de costos",
-     "descripcion": "Estimación del costo fiscal de los desastres naturales.",
-     "etiquetas": ["Costos", "Pasivos contingentes"]},
+    {"ruta": RUTA_COSTOS, "icono": "moneda", "lista": True,
+     "titulo": "Estimación de costos de desastres naturales",
+     "descripcion": "Cuánto costarían los daños del Fenómeno El Niño 2026-2027 según la trayectoria "
+                    "proyectada del ICEN.",
+     "etiquetas": ["FEN", "Costos", "ICEN"]},
 ]
 
 # ---- 1.3 Índices climáticos mensuales (archivo ICEM.xlsx) -----------------------
@@ -153,7 +156,7 @@ INDICES_CLIMA = {
                              "extenderse a distintas regiones del mundo."),
               "calidas": [("Cálida", 0.5)], "frias": [("Fría", -0.5)], "incluye_limite": True},
 }
-FUENTE_CLIMA = "Fuente: IMARPE (SIOFEN). Los valores marcados con * en el Excel se muestran como preliminares."
+FUENTE_CLIMA = "Fuente: IMARPE (SIOFEN)."
 FUENTE_CLIMA_CORTA = "Fuente: IMARPE (SIOFEN)."   # la que va debajo de cada gráfico
 
 # ---- 1.4 Índice de Desastres (archivo IRD_RESULTADO.xlsx, hoja IRD_ANUAL) --------
@@ -165,9 +168,9 @@ COL_ID, COL_FREC, COL_SEV, COL_INCIDENCIAS = "IRD", "I_FREC", "I_DANO", "NUM_INC
 INDICADORES_ID = {
     COL_ID: {"nombre": "Índice de Desastres (ID)", "corto": "ID", "tope": 10, "decimales": 1,
              "unidad": "(Puntaje de 0 a 10)"},
-    COL_FREC: {"nombre": "Índice de frecuencia", "corto": "Frecuencia", "tope": 1, "decimales": 2,
+    COL_FREC: {"nombre": "Frecuencia de los desastres", "corto": "Frecuencia", "tope": 1, "decimales": 2,
                "unidad": "(Índice de 0 a 1)"},
-    COL_SEV: {"nombre": "Severidad global", "corto": "Severidad global", "tope": 1, "decimales": 2,
+    COL_SEV: {"nombre": "Severidad de los daños", "corto": "Severidad", "tope": 1, "decimales": 2,
               "unidad": "(Índice de 0 a 1)"},
 }
 # Los 4 pilares de la severidad (25 % cada uno), como en la ficha metodológica
@@ -182,9 +185,9 @@ PILARES = {
                    "detalle": "Cultivos y ganado"},
 }
 DEFINICION_ID = ("Mide la severidad de los daños ocasionados por desastres naturales en un departamento durante "
-                 "un periodo determinado. ID = 10 × Frecuencia × Severidad global (pilares humano, social, "
-                 "infraestructura y productivo, 25 % cada uno). Escala de 0 (afectación mínima) a 10 "
-                 "(afectación muy alta).")
+                 "un periodo determinado. ID = 10 × Frecuencia de los desastres × Severidad de los daños (pilares "
+                 "humano, social, infraestructura y productivo, 25 % cada uno).")
+NOTA_ESCALAS_ID = "El ID va de 0 a 10; la frecuencia, la severidad de los daños y sus pilares van de 0 a 1."
 FUENTE_ID = "Fuente: INDECI. Elaboración: DRF-VMH."
 METODO_CUARTIL_ID = "excel_inc"
 NACIONAL = "PERÚ (promedio)"
@@ -210,26 +213,28 @@ INDICADORES_INFORM = {
     "VULNERABILITY": "Vulnerabilidad",
     "LACK OF COPING CAPACITY": "Falta de capacidad de respuesta",
 }
-DIMENSIONES_INFORM = {   # las 3 dimensiones de la fórmula (Gráfico 5)
+DIMENSIONES_INFORM = {   # los 3 componentes de la fórmula (tarjetas y Gráfico 4)
     "HAZARD & EXPOSURE": ("Amenaza y exposición", "#D7262B"),
     "VULNERABILITY": ("Vulnerabilidad", "#1F4E9A"),
     "LACK OF COPING CAPACITY": ("Falta de capacidad de respuesta", "#C0661C"),
 }
-AMENAZAS_NATURALES = {"Earthquake": "Terremoto", "River Flood": "Inundación fluvial", "Tsunami": "Tsunami",
-                      "Tropical Cyclone": "Ciclón tropical", "Coastal flood": "Inundación costera",
-                      "Drought": "Sequía", "Epidemic": "Epidemia"}
-SUBCOMPONENTES_INFORM = {   # Gráfico 6: (dimensión, nombre)
+# Gráfico 4: qué hay dentro de cada componente (columna del Excel -> (componente, nombre))
+SUBCOMPONENTES_INFORM = {
+    "Earthquake": ("Amenaza y exposición", "Terremoto"), "River Flood": ("Amenaza y exposición", "Inundación fluvial"),
+    "Tsunami": ("Amenaza y exposición", "Tsunami"), "Tropical Cyclone": ("Amenaza y exposición", "Ciclón tropical"),
+    "Coastal flood": ("Amenaza y exposición", "Inundación costera"), "Drought": ("Amenaza y exposición", "Sequía"),
+    "Epidemic": ("Amenaza y exposición", "Epidemia"),
     "Development & Deprivation": ("Vulnerabilidad", "Desarrollo y privaciones"),
     "Inequality": ("Vulnerabilidad", "Desigualdad"),
     "Economic Dependency": ("Vulnerabilidad", "Dependencia económica"),
     "Uprooted people": ("Vulnerabilidad", "Población desplazada"),
     "Health Conditions": ("Vulnerabilidad", "Condiciones de salud"),
     "Food Security": ("Vulnerabilidad", "Inseguridad alimentaria"),
-    "DRR": ("Falta de capacidad", "Gestión del riesgo de desastres"),
-    "Governance": ("Falta de capacidad", "Gobernanza"),
-    "Communication": ("Falta de capacidad", "Comunicación"),
-    "Physical infrastructure": ("Falta de capacidad", "Infraestructura física"),
-    "Access to health care": ("Falta de capacidad", "Acceso a la salud"),
+    "DRR": ("Falta de capacidad de respuesta", "Gestión del riesgo de desastres"),
+    "Governance": ("Falta de capacidad de respuesta", "Gobernanza"),
+    "Communication": ("Falta de capacidad de respuesta", "Comunicación"),
+    "Physical infrastructure": ("Falta de capacidad de respuesta", "Infraestructura física"),
+    "Access to health care": ("Falta de capacidad de respuesta", "Acceso a la salud"),
 }
 # Clases del INFORM (umbrales de la clase de riesgo del Excel) y sus colores
 CLASES_INFORM = [  # (nombre, desde, color)
@@ -269,10 +274,8 @@ INDICADORES_LATAM = {"eventos": "Número de desastres", "costo_pbi": "Costo econ
 # Cuartiles como en los mapas de la presentación (Mapa N.º 1: grupos; Mapa N.º 2: CUARTIL.EXC)
 METODO_CUARTIL_LATAM = {"eventos": "grupos", "costo_pbi": "excel_exc"}
 TEXTOS_LATAM = {   # términos de la presentación
-    "eventos": {"indicador": "Indicador 1: Frecuencia de los desastres",
-                "que_mide": "Número de desastres naturales registrados en cada país o territorio."},
-    "costo_pbi": {"indicador": "Indicador 2: Costo económico de los desastres",
-                  "que_mide": "Monto de los daños económicos ocasionados por los desastres, ajustado por "
+    "eventos": {"que_mide": "Número de desastres naturales registrados en cada país o territorio."},
+    "costo_pbi": {"que_mide": "Monto de los daños económicos ocasionados por los desastres, ajustado por "
                               "inflación, como porcentaje del PBI."},
 }
 COLORES_SUBGRUPO = {"Biológico": "#156082", "Climatológico": "#7F7F7F", "Geofísico": "#F2AA84",   # Gráfico 4
@@ -286,6 +289,25 @@ NOMBRES_CORTOS = {"Movimiento de masa (húmedo)": "Mov. de masa (húmedo)",
                   "Movimiento de masa (seco)": "Mov. de masa (seco)"}
 COLOR_PERIODO_1, COLOR_PERIODO_2 = "#7F7F7F", "#C00000"
 COLOR_DISPERSION, COLOR_TENDENCIA = "#0B2A5B", "#C00000"
+
+
+# ---- 1.7 Estimación de costos de desastres naturales (fen_motor.py + BASE_FEN_CONSOLIDADA.xlsx) -----
+# El modelo se estima con fen_motor.py al abrir el tablero (unos 20 s la primera vez). El resultado se guarda en
+# ARCHIVO_CACHE_FEN para que las siguientes veces abra al instante; si cambias la base, se vuelve a estimar solo.
+ARCHIVO_FEN = os.path.join(CARPETA, "BASE_FEN_CONSOLIDADA.xlsx")
+ARCHIVO_CACHE_FEN = os.path.join(CARPETA, "fen_cache.pkl")
+FORMA_FEN = "lin_lluv"                      # forma del efecto del ICEN (la elegida por validación)
+SIMULADOR_DESDE, SIMULADOR_HASTA = "2026-10", "2027-12"   # meses que se pueden simular
+SORTEOS_FEN = 300                           # sorteos de los coeficientes para el rango probable
+FUENTE_COSTOS = ("Fuente: INDECI (SINPAD 2003-2025), ENFEN (ICEN), BCRP (IPC) y CAF (costos unitarios). "
+                 "Elaboración: DRF-VMH.")
+DEFINICION_COSTOS = ("Escribe el ICEN proyectado de cada mes y el modelo calcula cuánto costarían los daños por "
+                     "lluvias y sequías del Fenómeno El Niño, frente a una temporada normal (ICEN = 0).")
+SECTOR_INICIAL = "Total"
+ICEN_MIN, ICEN_MAX = -1.5, 5.0          # rango permitido del ICEN (°C)
+COLOR_NORMAL, COLOR_FEN = "#9DB4CC", COLOR_ROJO_PPT
+COLOR_TEMPORADA_NINO = "#F2AA84"         # temporadas pasadas con ICEN máximo ≥ 1 °C
+TOP_DEPARTAMENTOS = 12
 
 
 # =============================================================================
@@ -563,7 +585,7 @@ def cargar_inform():
         return None
     df = pd.read_excel(ARCHIVO_INFORM, sheet_name=HOJA_INFORM, skiprows=[1])
     df.columns = df.columns.astype(str).str.strip()
-    columnas = (list(INDICADORES_INFORM) + list(AMENAZAS_NATURALES) + list(SUBCOMPONENTES_INFORM)
+    columnas = (list(INDICADORES_INFORM) + list(SUBCOMPONENTES_INFORM)
                 + ["Rank", "Human"])
     for col in columnas:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -637,6 +659,165 @@ def porcentaje_corto(v):
 
 
 
+# ---- 3.5 Estimación de costos (simulador) ----------------------------------------------
+def cargar_costos():
+    """Estima el modelo con fen_motor.py (o lo lee de la caché) y arma un modelo por sector para el simulador.
+    Si falta la base o fen_motor.py, devuelve None (la página queda «En preparación»)."""
+    if not os.path.exists(ARCHIVO_FEN):
+        return None
+    firma = (f"{os.path.getsize(ARCHIVO_FEN)}-{int(os.path.getmtime(ARCHIVO_FEN))}-{FORMA_FEN}-"
+             f"{SIMULADOR_DESDE}-{SIMULADOR_HASTA}-{SORTEOS_FEN}")
+    try:
+        with open(ARCHIVO_CACHE_FEN, "rb") as archivo:
+            guardado = pickle.load(archivo)
+        if guardado.get("firma") == firma:
+            return guardado
+    except (OSError, pickle.PickleError, EOFError, AttributeError):
+        pass
+    if CARPETA not in sys.path:   # fen_motor.py está junto a app.py
+        sys.path.insert(0, CARPETA)
+    try:
+        import fen_motor as FM
+    except ImportError:
+        return None
+    costos = preparar_costos(FM)
+    costos["firma"] = firma
+    try:
+        with open(ARCHIVO_CACHE_FEN, "wb") as archivo:
+            pickle.dump(costos, archivo)
+    except OSError:
+        pass
+    return costos
+
+
+def preparar_costos(FM):
+    """Lee la base, estima el modelo (total y 7 sectores) y separa sus piezas:
+    costo = exp(parte fija de cada zona y mes + coeficientes del ICEN × ICEN)."""
+    base = FM.cargar_base(ARCHIVO_FEN)
+    pm = base["pm"]
+    mod = FM.estimar(pm, FORMA_FEN)
+    periodos = [str(p) for p in pd.period_range(SIMULADOR_DESDE, SIMULADOR_HASTA, freq="M")]
+    cero = {p: 0.0 for p in periodos}
+    rng = np.random.default_rng(20261015)
+    modelos = {}
+    for clave, nombre in [("total", "Total")] + [(s, FM.NOMBRE_SECTOR[s]) for s in FM.SECTORES]:
+        fit = mod[clave]
+        filas = FM.filas_escenario(pm, None, cero)
+        X = FM.diseno_nuevo(fit, filas)
+        ic = [fit.nombres.index(c) for c in fit.clima]
+        io = [j for j in range(len(fit.nombres)) if j not in ic]
+        celdas = set(fit.D["zona"] + "·" + fit.D["mes"].astype(str))
+        vivo = (filas["unidad"].isin(set(fit.D["unidad"]))
+                & (filas["zona"] + "·" + filas["mes"].astype(str)).isin(celdas)).to_numpy()
+        V = fit.V_dk[np.ix_(ic, ic)]
+        V = (V + V.T) / 2
+        w, Q = np.linalg.eigh(V)
+        V = (Q * np.clip(w, 0, None)) @ Q.T
+        zonas = np.array([c.split("_", 1)[1] for c in fit.clima])
+        modelos[nombre] = {
+            "eta": np.where(vivo, X[:, io] @ fit.beta[io], -50.0), "periodo": filas["periodo"].astype(str).to_numpy(),
+            "dpto": filas["dpto"].astype(str).to_numpy(), "lluvioso": filas["lluvioso"].to_numpy(float),
+            "zona_de": (filas["zona"].to_numpy()[:, None] == zonas[None, :]).astype(float),
+            "tipos": [c.split("_", 1)[0] for c in fit.clima], "beta": fit.beta[ic],
+            "sorteos": rng.multivariate_normal(fit.beta[ic], V, size=SORTEOS_FEN, method="eigh", check_valid="ignore")}
+    # Temporadas pasadas (oct-set): costo observado de cada mes, total y por sector
+    obs = pm[pm["temporada"].isin(FM.TEMPORADAS)]
+    historico = obs.groupby(["temporada", "mes"]).agg(
+        Total=("costo_total_caf", "sum"), **{FM.NOMBRE_SECTOR[s]: (f"costo_{s}_caf", "sum") for s in FM.SECTORES})
+    historico = historico.reset_index().merge(
+        base["temporadas"][["temporada", "icen_max_dic_abr"]].rename(columns={"icen_max_dic_abr": "icen_max"}),
+        on="temporada")
+    inicial = {p: float(base["trayectoria"].get(p, 0.0)) for p in periodos}
+    return {"info": {"mes_base_soles": base["mes_base"], "forma": FORMA_FEN, "unidades": int(pm["unidad"].nunique()),
+                     "panel_desde": str(pm["periodo"].min()), "panel_hasta": str(pm["periodo"].max())},
+            "forma": FORMA_FEN, "sigma": float(mod["sigma"]), "periodos": periodos, "inicial": inicial,
+            "en_supuestos": [i for i, p in enumerate(periodos) if p in base["trayectoria"]],
+            "maximos": {p: float(base["max_mes"][int(p[5:7])]) for p in periodos},
+            "cuando": {p: str(base["cuando_max"][int(p[5:7])]) for p in periodos},
+            "modelos": modelos, "historico": historico}
+
+
+def matriz_clima(m, x, forma):
+    """Columnas del ICEN en el modelo (parte cálida y fría por macrozona) para un ICEN por fila."""
+    calido, frio = np.clip(x, 0, None), np.clip(-x, 0, None)
+    if forma == "log":
+        calido = np.log1p(calido)
+    columnas = []
+    for tipo in m["tipos"]:
+        if tipo == "cal":     # parte cálida (en "lin_lluv": solo meses de lluvia, dic-abr)
+            columnas.append(calido * (m["lluvioso"] if forma == "lin_lluv" else 1.0))
+        elif tipo == "cas":   # parte cálida en meses secos ("lin_lluv")
+            columnas.append(calido * (1 - m["lluvioso"]))
+        else:                 # parte fría
+            columnas.append(frio)
+    return np.column_stack(columnas) * m["zona_de"]
+
+
+def simular(costos, sector, icen, sorteos=False):
+    """Costo esperado de cada unidad × mes con el ICEN de cada mes ({periodo: °C}).
+    costo = exp(parte fija + coeficientes del ICEN × ICEN). Con sorteos: una fila por sorteo de coeficientes."""
+    m = costos["modelos"][sector]
+    X = matriz_clima(m, np.array([icen[p] for p in m["periodo"]], float), costos["forma"])
+    if sorteos:
+        return np.exp(np.clip(m["eta"][None, :] + m["sorteos"] @ X.T, -50, 50))
+    return np.exp(np.clip(m["eta"] + X @ m["beta"], -50, 50))
+
+
+def icen_usado(costos, icen, tope):
+    """Con tope, cada mes usa el menor valor entre tu ICEN y el máximo ya observado en ese mes (2003-2025)."""
+    return {p: min(v, costos["maximos"][p]) if tope else v for p, v in icen.items()}
+
+
+def resumen_simulacion(costos, sector, icen, horizonte=None):
+    """Totales, rango de incertidumbre, costo por mes y por departamento del escenario.
+    horizonte: lista de meses que se suman (por defecto, todos)."""
+    m = costos["modelos"][sector]
+    horizonte = horizonte or costos["periodos"]
+    dentro = np.isin(m["periodo"], horizonte)
+    cero = {p: 0.0 for p in costos["periodos"]}
+    esperado, normal = simular(costos, sector, icen), simular(costos, sector, cero)
+    k_esperado = simular(costos, sector, icen, sorteos=True)[:, dentro].sum(axis=1)
+    k_normal = simular(costos, sector, cero, sorteos=True)[:, dentro].sum(axis=1)
+    filas = pd.DataFrame({"periodo": m["periodo"], "dpto": m["dpto"], "esperado": esperado, "normal": normal})
+    sub = filas[dentro]
+    return {"total": sub["esperado"].sum(), "normal": sub["normal"].sum(),
+            "fen": sub["esperado"].sum() - sub["normal"].sum(),
+            "fen_p10": np.percentile(k_esperado - k_normal, 10), "fen_p90": np.percentile(k_esperado - k_normal, 90),
+            "sorteos_total": k_esperado, "horizonte": list(horizonte),
+            "por_mes": filas.groupby("periodo")[["esperado", "normal"]].sum().reindex(costos["periodos"]),
+            "por_dpto": sub.groupby("dpto")[["esperado", "normal"]].sum()}
+
+
+def monto(millones, moneda="S/"):
+    """Montos en millones: 999 -> 'S/ 999 millones'; 10311 -> 'S/ 10,3 mil millones'."""
+    if es_vacio(millones):
+        return "—"
+    if abs(millones) >= 1000:
+        return f"{moneda} {numero(millones / 1000, 1)} mil millones"
+    return f"{moneda} {numero(millones, 0)} millones"
+
+
+def soles(valor):
+    return monto(valor, "S/")
+
+
+def mes_corto(periodo):
+    """'2026-10' -> 'Oct 2026'"""
+    anio, mes = str(periodo)[:7].split("-")
+    return f"{MESES[int(mes) - 1][:3]} {anio}"
+
+
+def mes_texto(periodo):
+    """'2026-09' -> 'septiembre 2026'"""
+    anio, mes = str(periodo)[:7].split("-")
+    return f"{MESES[int(mes) - 1].lower()} {anio}"
+
+
+def temporada_texto(temporada):
+    """2017 -> '2016-17'"""
+    return f"{int(temporada) - 1}-{str(int(temporada))[-2:]}"
+
+
 # =============================================================================
 # 4. GRÁFICOS  (una función por gráfico; todas devuelven una figura de Plotly)
 # =============================================================================
@@ -702,6 +883,59 @@ def grafico_sparkline(serie, anio, decimales=0):
                         marker=dict(size=8, color=C["pacifico"], line=dict(color="white", width=1.5)))
     fig.update_layout(height=52, margin=dict(l=0, r=0, t=4, b=0), showlegend=False, hovermode="x",
                       xaxis=dict(visible=False), yaxis=dict(visible=False, rangemode="tozero"))
+    return fig
+
+
+def grafico_media_luna(valor, limites, colores, etiquetas=None, extremos=("BAJO", "ALTO"), decimales=1):
+    """Velocímetro en media luna, con el mismo dibujo que el de los índices climáticos.
+    limites: [desde, corte 1, ..., hasta]; colores: uno por tramo (de izquierda a derecha).
+    etiquetas: nombre de cada tramo; si no se dan, se escriben los cortes."""
+    desde, hasta = float(limites[0]), float(limites[-1])
+    r_in = 0.36
+    fig = go.Figure()
+
+    def angulo(v):
+        return 180 - (min(max(float(v), desde), hasta) - desde) / (hasta - desde) * 180
+
+    def arco(a1, a2, radio, puntos=30):
+        ang = np.radians(np.linspace(a1, a2, puntos))
+        return list(radio * np.cos(ang)), list(radio * np.sin(ang))
+
+    for k, color in enumerate(colores):
+        a1, a2 = angulo(limites[k]), angulo(limites[k + 1])
+        if a1 - a2 < 0.2:
+            continue
+        xo, yo = arco(a1, a2, 1)
+        xi, yi = arco(a2, a1, r_in)
+        fig.add_scatter(x=xo + xi + [xo[0]], y=yo + yi + [yo[0]], fill="toself", mode="lines", fillcolor=color,
+                        line=dict(color="#4d4d4d", width=0.8), hoverinfo="skip")
+        if etiquetas:
+            medio = np.radians((a1 + a2) / 2)
+            fig.add_annotation(x=1.13 * np.cos(medio), y=1.13 * np.sin(medio), text=etiquetas[k], showarrow=False,
+                               textangle=90 - (a1 + a2) / 2, font=dict(size=8, color=C["tinta"]))
+    if not etiquetas:  # números en los cortes
+        for v in limites:
+            a = np.radians(angulo(v))
+            fig.add_annotation(x=1.12 * np.cos(a), y=1.12 * np.sin(a), text=numero(v, decimales), showarrow=False,
+                               font=dict(size=9, color=C["tinta_2"]))
+    xh, yh = arco(180, 0, r_in)
+    fig.add_scatter(x=xh, y=yh, fill="toself", mode="lines", fillcolor="#ffffff",
+                    line=dict(color="#4d4d4d", width=0.8), hoverinfo="skip")
+    fig.add_shape(type="line", x0=-1, x1=1, y0=0, y1=0, line=dict(color="#4d4d4d", width=1))
+    if not es_vacio(valor):
+        a = np.radians(angulo(valor))
+        largo = r_in * 0.86
+        fig.add_annotation(x=largo * np.cos(a), y=largo * np.sin(a), ax=0, ay=0, xref="x", yref="y", axref="x",
+                           ayref="y", text="", showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2.6,
+                           arrowcolor="#111111")
+        fig.add_scatter(x=[0], y=[0], mode="markers", hoverinfo="skip", marker=dict(size=9, color="#111111"))
+    fig.add_annotation(x=-1, y=-0.02, text=f"<b>{extremos[0]}</b>", showarrow=False, xanchor="left", yanchor="top",
+                       font=dict(size=9.5, color=C["tinta"]))
+    fig.add_annotation(x=1, y=-0.02, text=f"<b>{extremos[1]}</b>", showarrow=False, xanchor="right", yanchor="top",
+                       font=dict(size=9.5, color=C["tinta"]))
+    fig.update_layout(showlegend=False, margin=dict(l=2, r=2, t=2, b=2),
+                      xaxis=dict(visible=False, range=[-1.24, 1.24], fixedrange=True),
+                      yaxis=dict(visible=False, range=[-0.17, 1.27], fixedrange=True, scaleanchor="x", scaleratio=1))
     return fig
 
 
@@ -837,13 +1071,7 @@ def grafico_evolucion_clima(clima, clave, idx):
         hovermode="closest", margin=dict(l=4, r=4, t=36, b=4),
         yaxis=dict(title=clave, range=[bajo - pad, alto + pad * 1.8], zeroline=False, ticksuffix=sufijo),
         xaxis=dict(showgrid=False, tickformat="%Y", dtick="M24",
-                   range=[datos["fecha"].min() - pd.DateOffset(months=2), datos["fecha"].max() + pd.DateOffset(months=4)],
-                   rangeselector=dict(
-            x=0, y=1.02, yanchor="bottom", bgcolor=C["niebla"], activecolor=C["azul_suave"],
-            font=dict(size=11, color=C["tinta"]),
-            buttons=[dict(count=2, label="2 años", step="year", stepmode="backward"),
-                     dict(count=5, label="5 años", step="year", stepmode="backward"),
-                     dict(step="all", label="Todo")])))
+                   range=[datos["fecha"].min() - pd.DateOffset(months=2), datos["fecha"].max() + pd.DateOffset(months=4)]))
     return fig
 
 
@@ -1057,7 +1285,7 @@ def grafico_evolucion_id(serie_nac, anio, col, serie_dpto=None, nombre_dpto=""):
 
 
 def grafico_relacion_id(base, dpto_sel, anio, col):
-    """Gráfico 4: frecuencia contra severidad global, año a año (con «Reproducir»).
+    """Gráfico 4: frecuencia de los desastres contra severidad de los daños, año a año (con «Reproducir»).
     Burbuja = departamento; tamaño = ID; color = cuartil del indicador; curvas = mismo ID.
     Devuelve un dict (Dash lo acepta) porque así los cuadros de la animación se arman rápido."""
     anios = lista_anios(base)
@@ -1077,7 +1305,7 @@ def grafico_relacion_id(base, dpto_sel, anio, col):
                         opacity=0.9, line=dict(color=BORDE_MAPA, width=0.8), color=colores_clase(d[cq])),
             customdata=[[k, n, numero(i, 1)] for k, n, i in zip(d[COL_DPTO], d["NOMBRE"], d[COL_ID])],
             hovertemplate=("<b>%{customdata[1]}</b> (" + str(a) + ")<br>Frecuencia: %{x:.2f}"
-                           "<br>Severidad global: %{y:.2f}<br>ID: %{customdata[2]}<extra></extra>"))
+                           "<br>Severidad de los daños: %{y:.2f}<br>ID: %{customdata[2]}<extra></extra>"))
         sel = d[d[COL_DPTO] == dpto_sel]
         anillo = dict(type="scatter", x=sel[COL_FREC].tolist(), y=sel[COL_SEV].tolist(), mode="markers",
                       hoverinfo="skip", showlegend=False,
@@ -1104,8 +1332,8 @@ def grafico_relacion_id(base, dpto_sel, anio, col):
     pausar = dict(frame=dict(duration=0, redraw=False), mode="immediate", transition=dict(duration=0))
     fig.update_layout(
         margin=dict(l=4, r=40, t=36, b=80), legend=dict(y=1.04),
-        xaxis=dict(title="Índice de frecuencia", range=[0, 1.02], showgrid=True, gridcolor=C["rejilla"]),
-        yaxis=dict(title="Severidad global", range=[0, max_y]),
+        xaxis=dict(title="Frecuencia de los desastres (0 a 1)", range=[0, 1.02], showgrid=True, gridcolor=C["rejilla"]),
+        yaxis=dict(title="Severidad de los daños (0 a 1)", range=[0, max_y]),
         updatemenus=[dict(type="buttons", direction="left", x=0, xanchor="left", y=-0.16, yanchor="top",
                           showactive=False, pad=dict(t=0, r=8), bgcolor=C["superficie"],
                           bordercolor=C["borde"], font=dict(size=11, color=C["tinta"]),
@@ -1150,7 +1378,7 @@ def grafico_calor_id(base, dpto_sel, anio, col):
         fig.add_shape(**marco, x0=anios[0] - 0.5, x1=anios[-1] + 0.5, y0=i - 0.5, y1=i + 0.5)
     if anio in anios:
         fig.add_shape(**marco, x0=anio - 0.5, x1=anio + 0.5, y0=-0.5, y1=len(orden) - 0.5)
-    fig.update_layout(margin=dict(l=4, r=4, t=30, b=4), legend=dict(y=1.0, x=1, xanchor="right"),
+    fig.update_layout(margin=dict(l=4, r=4, t=56, b=4), legend=dict(y=1.09, x=1, xanchor="right"),
                       xaxis=dict(dtick=1, tickfont=dict(size=10.5), showline=False, side="top"),
                       yaxis=dict(autorange="reversed", tickfont=dict(size=11, color=C["tinta"]), showgrid=False))
     return fig
@@ -1254,71 +1482,27 @@ def grafico_grupos_inform(inform, iso_sel, col):
     return fig
 
 
-def grafico_amenazas_inform(inform, iso_sel):
-    """Gráfico 4: amenazas naturales del país frente al promedio de América Latina (21 países)."""
+def grafico_componentes_inform(inform, iso_sel):
+    """Gráfico 4: qué hay dentro de cada componente del INFORM Risk en el país, frente al promedio de la región.
+    Los tres componentes van en el mismo sentido: a mayor puntaje, mayor riesgo."""
     fila, alc = inform.loc[iso_sel], tabla_alc(inform)
-    datos = pd.DataFrame({"pais": [fila[c] for c in AMENAZAS_NATURALES],
-                          "alc": [alc[c].mean() for c in AMENAZAS_NATURALES]},
-                         index=list(AMENAZAS_NATURALES.values())).sort_values("pais")
-    nombre = fila["NOMBRE"]
+    columnas = [c for c in SUBCOMPONENTES_INFORM if c in inform.columns]
+    grupos = [SUBCOMPONENTES_INFORM[c][0] for c in columnas]
+    nombres = [SUBCOMPONENTES_INFORM[c][1] for c in columnas]
+    colores = {texto: color for texto, color in DIMENSIONES_INFORM.values()}
+    valores = [fila[c] for c in columnas]
     fig = go.Figure()
-    fig.add_bar(y=datos.index, x=datos["pais"], orientation="h", name=nombre, marker_color=COLOR_ROJO_PPT,
-                text=[numero(v, 1) for v in datos["pais"]], textposition="outside", cliponaxis=False,
-                textfont=dict(size=11, color=COLOR_AZUL_PPT),
-                hovertemplate=f"<b>%{{y}}</b> · {nombre}: %{{x:.1f}}<extra></extra>")
-    fig.add_scatter(y=datos.index, x=datos["alc"], mode="markers", name="Promedio de América Latina",
-                    marker=dict(symbol="diamond", size=11, color=COLOR_AZUL_PPT, line=dict(color="white", width=1)),
-                    hovertemplate="<b>%{y}</b> · promedio ALC: %{x:.1f}<extra></extra>")
-    fig.update_layout(bargap=0.35, margin=dict(l=4, r=8, t=30, b=4), legend=dict(y=1.02),
-                      xaxis=dict(range=[0, 10.8], showgrid=True, gridcolor=C["rejilla"], showline=False),
-                      yaxis=dict(tickfont=dict(size=11.5, color=C["tinta"])))
-    return fig
-
-
-def grafico_dimensiones_inform(alc, iso_sel):
-    """Gráfico 5: las 3 dimensiones de la fórmula en cada país (puntos) y el INFORM Risk (raya)."""
-    datos = alc.sort_values("INFORM RISK")
-    nombres = list(datos["NOMBRE"])
-    fig = go.Figure()
-    for nombre, fila in zip(nombres, datos.itertuples()):  # línea gris entre el mínimo y el máximo
-        vals = [datos.loc[fila.Index, c] for c in DIMENSIONES_INFORM]
-        fig.add_scatter(x=[min(vals), max(vals)], y=[nombre, nombre], mode="lines", showlegend=False,
-                        hoverinfo="skip", line=dict(color=C["borde"], width=3))
-    for col, (texto, color) in DIMENSIONES_INFORM.items():
-        fig.add_scatter(x=datos[col], y=nombres, mode="markers", name=texto,
-                        marker=dict(size=11, color=color, line=dict(color="white", width=1)),
-                        hovertemplate="<b>%{y}</b> · " + texto + ": %{x:.1f}<extra></extra>")
-    fig.add_scatter(x=datos["INFORM RISK"], y=nombres, mode="markers", name="INFORM Risk",
-                    marker=dict(symbol="line-ns", size=16, line=dict(color=C["tinta"], width=2.5)),
-                    hovertemplate="<b>%{y}</b> · INFORM Risk: %{x:.1f}<extra></extra>")
-    fig.update_layout(margin=dict(l=4, r=8, t=30, b=4), legend=dict(y=1.02),
-                      xaxis=dict(range=[0, 10], showgrid=True, gridcolor=C["rejilla"], showline=False,
-                                 title="Puntaje de 0 a 10"),
-                      yaxis=dict(categoryorder="array", categoryarray=nombres, tickvals=nombres,
-                                 ticktext=[f"<b>{n}</b>" if i == iso_sel else n for n, i in zip(nombres, datos.index)],
-                                 tickfont=dict(size=10.5, color=C["tinta"]), showgrid=False))
-    return fig
-
-
-def grafico_subcomponentes_inform(inform, iso_sel):
-    """Gráfico 6: qué explica la vulnerabilidad y la falta de capacidad de respuesta del país."""
-    fila, alc = inform.loc[iso_sel], tabla_alc(inform)
-    dims = [d for d, _ in SUBCOMPONENTES_INFORM.values()]
-    nombres = [n for _, n in SUBCOMPONENTES_INFORM.values()]
-    colores = {"Vulnerabilidad": DIMENSIONES_INFORM["VULNERABILITY"][1],
-               "Falta de capacidad": DIMENSIONES_INFORM["LACK OF COPING CAPACITY"][1]}
-    valores = [fila[c] for c in SUBCOMPONENTES_INFORM]
-    fig = go.Figure()
-    fig.add_bar(y=[dims, nombres], x=valores, orientation="h", name=fila["NOMBRE"], showlegend=False,
-                marker_color=[colores[d] for d in dims], text=[numero(v, 1) for v in valores],
+    fig.add_bar(y=[grupos, nombres], x=valores, orientation="h", name=fila["NOMBRE"], showlegend=False,
+                marker_color=[colores[g] for g in grupos], text=[numero(v, 1) for v in valores],
                 textposition="outside", cliponaxis=False, textfont=dict(size=11, color=COLOR_AZUL_PPT),
                 hovertemplate="<b>%{y}</b>: %{x:.1f}<extra></extra>")
-    fig.add_scatter(y=[dims, nombres], x=[alc[c].mean() for c in SUBCOMPONENTES_INFORM], mode="markers",
-                    name="Promedio de América Latina",
+    fig.add_scatter(y=[grupos, nombres], x=[alc[c].mean() for c in columnas], mode="markers",
+                    name="Promedio de América Latina (21 países)",
                     marker=dict(symbol="diamond", size=10, color=C["tinta"], line=dict(color="white", width=1)),
-                    hovertemplate="<b>%{y}</b> · promedio ALC: %{x:.1f}<extra></extra>")
+                    hovertemplate="<b>%{y}</b> · promedio de la región: %{x:.1f}<extra></extra>")
     fig.update_layout(bargap=0.3, margin=dict(l=4, r=8, t=30, b=4), legend=dict(y=1.02),
-                      xaxis=dict(range=[0, 10.8], showgrid=True, gridcolor=C["rejilla"], showline=False),
+                      xaxis=dict(range=[0, 10.8], showgrid=True, gridcolor=C["rejilla"], showline=False,
+                                 title="Puntaje de 0 a 10"),
                       yaxis=dict(autorange="reversed", tickfont=dict(size=11, color=C["tinta"])))
     return fig
 
@@ -1504,15 +1688,15 @@ def grafico_anual_pais(latam, pais, a0, a1, medida):
     e = eventos_periodo(latam, a0, a1)
     e = e[e["pais"] == pais]
     if costo:
-        tabla = e.pivot_table(index="anio", columns="subgrupo", values="dano_miles_usd", aggfunc="sum") / 1000
+        tabla = e.pivot_table(index="anio", columns="subgrupo", values="dano_miles_usd", aggfunc="sum") / 1e6
     else:
         tabla = e.pivot_table(index="anio", columns="subgrupo", values="id", aggfunc="count")
     tabla = tabla.reindex(index=range(a0, a1 + 1), columns=ORDEN_SUBGRUPOS_PAIS).fillna(0)
     fig = go.Figure()
-    formato = ":,.0f"
+    formato = ":,.2f" if costo else ":,.0f"
     for sub in ORDEN_SUBGRUPOS_PAIS:
         fig.add_bar(x=tabla.index, y=tabla[sub], name=sub, marker=dict(color=COLORES_TIPO[sub], line=dict(width=0)),
-                    hovertemplate=sub + f": %{{y{formato}}}" + (" millones US$" if costo else "") + "<extra></extra>")
+                    hovertemplate=sub + f": %{{y{formato}}}" + (" mil millones de US$" if costo else "") + "<extra></extra>")
     total = tabla.sum(axis=1)
     if costo:  # los 3 años más costosos, con el desastre que más costó
         for anio in total[total > 0].nlargest(3).index:
@@ -1520,7 +1704,7 @@ def grafico_anual_pais(latam, pais, a0, a1, medida):
             fig.add_annotation(x=anio, y=total[anio], yshift=12, showarrow=False,
                                text=f"<b>{anio}</b> · {nombre_corto(fila['tipo'])}",
                                font=dict(size=10.5, color=COLOR_AZUL_PPT), bgcolor=hex_a_rgba(C["superficie"], 0.85))
-        titulo_y = "Millones de US$"
+        titulo_y = "Miles de millones de US$"
     else:
         movil = total.rolling(5, min_periods=1).mean()
         fig.add_scatter(x=movil.index, y=movil, name="Promedio de 5 años", mode="lines",
@@ -1536,6 +1720,158 @@ def grafico_anual_pais(latam, pais, a0, a1, medida):
     return fig
 
 
+
+
+# ---- 4.5 Estimación de costos (simulador) ----------------------------------------------------
+def eje_soles(titulo="Millones de S/"):
+    return dict(title=titulo, rangemode="tozero", tickformat=",.0f")
+
+
+def grafico_costo_mes(costos, res, icen):
+    """Gráfico 1: costo esperado por mes (temporada normal + efecto del FEN) y el ICEN de cada mes."""
+    meses = res["horizonte"]
+    etiquetas = [mes_corto(p) for p in meses]
+    pm_ = res["por_mes"].loc[meses]
+    fen = pm_["esperado"] - pm_["normal"]
+    fig = go.Figure()
+    fig.add_bar(x=etiquetas, y=pm_["normal"], name="Temporada normal", marker_color=COLOR_NORMAL,
+                hovertemplate="%{x} · normal: S/ %{y:,.0f} M<extra></extra>")
+    fig.add_bar(x=etiquetas, y=fen, name="Efecto del FEN", marker_color=COLOR_FEN,
+                hovertemplate="%{x} · efecto del FEN: S/ %{y:,.0f} M<extra></extra>")
+    fig.add_scatter(x=etiquetas, y=pm_["esperado"], mode="text", text=[f"S/ {numero(v, 0)}" for v in pm_["esperado"]],
+                    textposition="top center", textfont=dict(size=11, color=COLOR_AZUL_PPT), showlegend=False,
+                    hoverinfo="skip", cliponaxis=False)
+    fig.add_scatter(x=etiquetas, y=[icen[p] for p in meses], name="ICEN usado (°C)", yaxis="y2",
+                    mode="lines+markers+text", text=[numero(icen[p], 1) for p in meses], textposition="top center",
+                    line=dict(color=COLOR_AZUL_PPT, width=2.4), marker=dict(size=8, color=COLOR_AZUL_PPT),
+                    textfont=dict(size=11, color=COLOR_AZUL_PPT), hovertemplate="%{x} · ICEN: %{y:.1f} °C<extra></extra>")
+    fig.add_scatter(x=etiquetas, y=[costos["maximos"][p] for p in meses], name="Máximo observado (°C)", yaxis="y2",
+                    mode="markers", marker=dict(symbol="line-ew", size=26, line=dict(color=C["tinta_3"], width=2.5)),
+                    hovertemplate="%{x} · máximo observado: %{y:.2f} °C<extra></extra>")
+    tope_y = max(pm_["esperado"].max(), 1) * 1.25
+    fig.update_layout(barmode="relative", bargap=0.35 if len(meses) < 10 else 0.2, hovermode="x unified",
+                      margin=dict(l=4, r=4, t=36, b=4), legend=dict(y=1.04, traceorder="normal"),
+                      xaxis=dict(type="category", tickangle=-45 if len(meses) > 9 else 0),
+                      yaxis=dict(eje_soles(), range=[min(0, fen.min() * 1.2), tope_y]),
+                      yaxis2=dict(overlaying="y", side="right", range=[ICEN_MIN, ICEN_MAX + 1], showgrid=False, dtick=1,
+                                  ticksuffix=" °C", tickfont=dict(color=COLOR_AZUL_PPT, size=11), zeroline=False))
+    return fig
+
+
+def grafico_curva_icen(costos, sector, periodo, icen_mes, tope):
+    """Gráfico 2: curva del costo del mes según el ICEN, con su banda de incertidumbre (P10-P90)."""
+    m = costos["modelos"][sector]
+    filas = m["periodo"] == periodo
+    sub = dict(m, eta=m["eta"][filas], lluvioso=m["lluvioso"][filas], zona_de=m["zona_de"][filas])
+    xs = np.round(np.arange(ICEN_MIN, ICEN_MAX + 0.001, 0.1), 2)
+    media, bajo, alto = [], [], []
+    for x in xs:
+        X = matriz_clima(sub, np.full(filas.sum(), x), costos["forma"])
+        media.append(np.exp(np.clip(sub["eta"] + X @ sub["beta"], -50, 50)).sum())
+        k = np.exp(np.clip(sub["eta"][None, :] + sub["sorteos"] @ X.T, -50, 50)).sum(axis=1)
+        bajo.append(np.percentile(k, 10))
+        alto.append(np.percentile(k, 90))
+    maximo = costos["maximos"][periodo]
+    usado = min(icen_mes, maximo) if tope else icen_mes
+    X = matriz_clima(sub, np.full(filas.sum(), usado), costos["forma"])
+    valor = np.exp(np.clip(sub["eta"] + X @ sub["beta"], -50, 50)).sum()
+    fig = go.Figure()
+    fig.add_vrect(x0=maximo, x1=ICEN_MAX, fillcolor=hex_a_rgba(COLOR_FEN, 0.07), line_width=0, layer="below")
+    fig.add_annotation(x=(maximo + ICEN_MAX) / 2, y=1, yref="paper", yanchor="top", showarrow=False,
+                       text="Fuera de lo observado<br>(el modelo extrapola)", font=dict(size=11, color=COLOR_FEN))
+    fig.add_vline(x=maximo, line=dict(color=C["tinta_3"], width=1.5, dash="dash"))
+    fig.add_annotation(x=maximo, y=1, yref="paper", yanchor="top", xanchor="right", showarrow=False, align="right",
+                       text=f"Máximo observado<br>{numero(maximo, 2)} °C ", font=dict(size=10.5, color=C["tinta_3"]))
+    fig.add_scatter(x=xs, y=alto, mode="lines", line=dict(width=0), hoverinfo="skip", showlegend=False)
+    fig.add_scatter(x=xs, y=bajo, mode="lines", line=dict(width=0), fill="tonexty", name="Rango probable (P10-P90)",
+                    fillcolor=hex_a_rgba(C["pacifico_medio"], 0.18), hoverinfo="skip")
+    fig.add_scatter(x=xs, y=media, mode="lines", name="Costo esperado", line=dict(color=COLOR_AZUL_PPT, width=3),
+                    hovertemplate="ICEN %{x:.1f} °C → S/ %{y:,.0f} M<extra></extra>")
+    fig.add_scatter(x=[usado], y=[valor], mode="markers", showlegend=False, hoverinfo="skip",
+                    marker=dict(size=15, color=COLOR_FEN, line=dict(color="white", width=2.5)))
+    fig.add_annotation(x=usado, y=valor, ax=-70, ay=-42, showarrow=True, arrowhead=0, arrowcolor=COLOR_FEN,
+                       text=f"<b>ICEN {numero(usado, 1)} °C → {monto(valor)}</b>", bgcolor=COLOR_FEN,
+                       font=dict(size=12, color="white"), borderpad=5)
+    zona_vista = xs <= max(usado, maximo) + 0.6   # escala que deja ver el punto elegido
+    tope_y = max(np.array(media)[zona_vista].max() * 1.8, valor * 1.3, 1)
+    fig.update_layout(hovermode="x unified", margin=dict(l=4, r=4, t=36, b=4), legend=dict(y=1.04),
+                      xaxis=dict(title="ICEN del mes (°C)", range=[ICEN_MIN, ICEN_MAX], dtick=0.5, ticksuffix=" °C",
+                                 showgrid=True, gridcolor=C["rejilla"]),
+                      yaxis=dict(eje_soles(), range=[0, tope_y]))
+    return fig
+
+
+def grafico_probabilidad(costos, sector, res):
+    """Gráfico 3: curva S del costo total de la temporada (probabilidad de quedar por debajo de cada monto)."""
+    rng = np.random.default_rng(2026)
+    k = res["sorteos_total"]
+    if sector == "Total":  # se suma el error típico de una temporada (validación del modelo)
+        s = costos["sigma"]
+        k = (k[:, None] * np.exp(rng.normal(-s ** 2 / 2, s, size=(len(k), 20)))).ravel()
+    v = np.sort(k)
+    prob = np.arange(1, len(v) + 1) / len(v) * 100
+    fig = go.Figure()
+    fig.add_scatter(x=v, y=prob, mode="lines", line=dict(color=COLOR_AZUL_PPT, width=3), name="Costo total",
+                    showlegend=False, hovertemplate="S/ %{x:,.0f} M o menos: %{y:.0f} %<extra></extra>")
+    for p, texto in [(10, "1 de cada 10"), (50, "La mitad"), (90, "9 de cada 10")]:
+        x = np.percentile(v, p)
+        fig.add_scatter(x=[x], y=[p], mode="markers", showlegend=False, hoverinfo="skip",
+                        marker=dict(size=11, color=COLOR_FEN, line=dict(color="white", width=2)))
+        derecha = p == 90   # la última etiqueta va a la izquierda del punto para no salirse
+        fig.add_annotation(x=x, y=p, text=f"<b>{texto}</b>: menos de {monto(x)}", xanchor="right" if derecha else "left",
+                           showarrow=False, xshift=-10 if derecha else 10, font=dict(size=11.5, color=COLOR_AZUL_PPT),
+                           bgcolor=hex_a_rgba(C["superficie"], 0.85))
+    fig.add_vline(x=res["normal"], line=dict(color=C["tinta_3"], width=1.5, dash="dash"))
+    fig.add_annotation(x=res["normal"], y=103, xanchor="left", yanchor="bottom", showarrow=False, xshift=4,
+                       text=f"Temporada normal: {monto(res['normal'])}", font=dict(size=10.5, color=C["tinta_3"]))
+    fig.update_layout(margin=dict(l=4, r=4, t=30, b=4), hovermode="closest",
+                      xaxis=dict(title="Costo total de la temporada (millones de S/)", tickformat=",.0f",
+                                 range=[0, np.percentile(v, 97)], showgrid=True, gridcolor=C["rejilla"]),
+                      yaxis=dict(title="Probabilidad de que cueste menos (%)", range=[0, 112], ticksuffix=" %",
+                                 tickvals=[0, 20, 40, 60, 80, 100]))
+    return fig
+
+
+def grafico_departamentos(res):
+    """Gráfico 4: departamentos con mayor costo esperado (temporada normal + efecto del FEN)."""
+    d = res["por_dpto"].sort_values("esperado", ascending=False).head(TOP_DEPARTAMENTOS).iloc[::-1]
+    nombres = [nombre_visible(str(x).upper()) for x in d.index]
+    fen = d["esperado"] - d["normal"]
+    fig = go.Figure()
+    fig.add_bar(y=nombres, x=d["normal"], orientation="h", name="Temporada normal", marker_color=COLOR_NORMAL,
+                hovertemplate="%{y} · normal: S/ %{x:,.0f} M<extra></extra>")
+    fig.add_bar(y=nombres, x=fen, orientation="h", name="Efecto del FEN", marker_color=COLOR_FEN,
+                hovertemplate="%{y} · efecto del FEN: S/ %{x:,.0f} M<extra></extra>")
+    fig.add_scatter(y=nombres, x=d["esperado"], mode="text", text=[f"  S/ {numero(v, 0)}" for v in d["esperado"]],
+                    textposition="middle right", textfont=dict(size=11, color=COLOR_AZUL_PPT), showlegend=False,
+                    hoverinfo="skip", cliponaxis=False)
+    fig.update_layout(barmode="relative", bargap=0.25, margin=dict(l=4, r=8, t=36, b=4), legend=dict(y=1.04),
+                      xaxis=dict(visible=False, range=[0, d["esperado"].max() * 1.2]),
+                      yaxis=dict(tickfont=dict(size=11.5, color=C["tinta"])))
+    return fig
+
+
+def grafico_temporadas(costos, sector, res):
+    """Gráfico 5: costo de cada temporada pasada (oct-set) en los mismos meses del año y el escenario simulado."""
+    meses_anio = sorted({int(p[5:7]) for p in res["horizonte"]})
+    h = costos["historico"]
+    t = (h[h["mes"].isin(meses_anio)].groupby("temporada").agg(costo=(sector, "sum"), icen_max=("icen_max", "first"))
+         .reset_index().sort_values("temporada"))
+    x = [temporada_texto(a) for a in t["temporada"]] + ["Escenario<br>simulado"]
+    y = list(t["costo"]) + [res["total"]]
+    colores = [COLOR_TEMPORADA_NINO if n >= 1 else COLOR_NORMAL for n in t["icen_max"]] + [COLOR_FEN]
+    umbral = sorted(y)[-4] if len(y) >= 4 else 0
+    fig = go.Figure(go.Bar(x=x, y=y, marker_color=colores, showlegend=False,
+                           text=[numero(v, 0) if (i == len(y) - 1 or v >= umbral) else "" for i, v in enumerate(y)],
+                           textposition="outside", cliponaxis=False, textfont=dict(size=11, color=COLOR_AZUL_PPT),
+                           hovertemplate="%{x}: S/ %{y:,.0f} M<extra></extra>"))
+    for nombre, color in [("Temporada pasada", COLOR_NORMAL), ("Temporada con El Niño (ICEN máx. ≥ 1 °C)",
+                                                                COLOR_TEMPORADA_NINO), ("Escenario simulado", COLOR_FEN)]:
+        fig.add_bar(x=[None], y=[None], name=nombre, marker_color=color)
+    fig.update_layout(bargap=0.25, margin=dict(l=4, r=4, t=36, b=4), legend=dict(y=1.06),
+                      xaxis=dict(type="category", tickangle=-45, tickfont=dict(size=10.5)),
+                      yaxis=dict(eje_soles(), range=[0, max(y) * 1.15]))
+    return fig
 
 
 # =============================================================================
@@ -1693,7 +2029,7 @@ def tarjeta_seccion(numero_tarjeta, seccion, dato):
     ])
 
 
-def crear_portada(clima=None, base_id=None, inform=None, latam=None):
+def crear_portada(clima=None, base_id=None, inform=None, latam=None, costos=None):
     datos = {}
     if clima is not None:
         datos[RUTA_CLIMA] = [html.Span(f"{clima['etiqueta'].iloc[0]} – {clima['etiqueta'].iloc[-1]} · "),
@@ -1710,16 +2046,16 @@ def crear_portada(clima=None, base_id=None, inform=None, latam=None):
         datos[RUTA_LATAM] = [html.Span(f"{e['anio'].min()}–{e['anio'].max()} · "),
                              html.Span(f"{e['pais'].nunique()} países · "),
                              html.Span(f"{numero(len(e), 0)} desastres")]
+    if costos is not None:
+        datos[RUTA_COSTOS] = [html.Span("Simulador con el ICEN proyectado · "),
+                              html.Span(f"{mes_corto(costos['periodos'][0])} – {mes_corto(costos['periodos'][-1])}")]
     tarjetas = [tarjeta_seccion(i, s, datos.get(s["ruta"], "En preparación"))
                 for i, s in enumerate(SECCIONES, start=1)]
     return html.Div(className="portada", children=[
         html.Header(className="portada-hero", children=html.Div(className="portada-interior", children=[
-            html.P(ANTETITULO_PORTADA, className="portada-antetitulo"),
             html.H1(TITULO_PORTADA),
             html.P(SUBTITULO_PORTADA, className="portada-sub")])),
         html.Nav(tarjetas, className="portada-tarjetas", **{"aria-label": "Tableros"}),
-        html.Footer(className="portada-pie", children=[
-            html.P("Elige un tablero para empezar. Puedes volver a esta portada desde cualquier página.")]),
     ])
 
 
@@ -1830,7 +2166,7 @@ def panel_definicion():
 def crear_layout_clima(clima):
     """título · 4 tarjetas · [Definición y criterio | Gráfico 1] · [Gráfico 2 | Gráfico 3]"""
     primero, ultimo = clima["etiqueta"].iloc[0], clima["etiqueta"].iloc[-1]
-    cabecera = cabecera_pagina("Índices climáticos mensuales · Condición del mar frente al Perú", "",
+    cabecera = cabecera_pagina("", "",
                                f"Cuatro índices mensuales que dicen si el mar está en condición cálida, neutra o "
                                f"fría, {primero} – {ultimo}.", prefijo="clima")
     fila_1 = html.Div(className="fila fila-2", children=[
@@ -1881,24 +2217,41 @@ def barra_lateral_id(base):
     ])
 
 
+def tarjeta_media_luna(id_base, sigla, nombre, nombre_icono="medidor", alto=165, destacada=False, color=None):
+    """Tarjeta con velocímetro en media luna (como las de los índices climáticos).
+    ids: <id_base>-titulo, <id_base>-graf, <id_base>-valor, <id_base>-nota"""
+    estilo = {"borderTop": f"4px solid {color}"} if color else {}
+    return html.Div(className="kpi-luna" + (" activa" if destacada else ""), style=estilo, children=[
+        html.Div(className="clima-tarjeta-cabeza", children=[
+            html.Span(icono(nombre_icono), className="kpi-icono",
+                      style={"background": hex_a_rgba(color, 0.14), "color": color} if color else {}),
+            html.Div([html.Span(sigla, id=f"{id_base}-titulo", className="clima-sigla"),
+                      html.Span(nombre, className="clima-nombre")])]),
+        dcc.Graph(id=f"{id_base}-graf", config={"displayModeBar": False, "staticPlot": True},
+                  style={"height": f"{alto}px"}),
+        html.P(id=f"{id_base}-valor", className="clima-valor"),
+        html.Div(id=f"{id_base}-nota", className="kpi-delta clima-delta")])
+
+
 def fila_kpis_id():
-    """Velocímetro del ID (promedio del Perú o departamento) + frecuencia + los 4 pilares de la severidad."""
-    principal = html.Div(className="kpi kpi-destacado kpi-velocimetro", children=[
-        html.Div(className="kpi-cabeza", children=[html.Span(icono("medidor"), className="kpi-icono"),
-                                                   html.Span(id="id-kpi-0-titulo", className="kpi-titulo")]),
-        dcc.Graph(id="id-velocimetro", config=CONFIG_MINI, style={"height": "140px"}),
-        html.Div(id="id-kpi-0-nota", className="velocimetro-texto")])
-    tarjetas = [tarjeta_kpi("id-kpi-1", "alerta", "Índice de frecuencia", alto_grafico=52)]
-    for i, (nombre, p) in enumerate(PILARES.items(), start=2):
-        tarjetas.append(tarjeta_kpi(f"id-kpi-{i}", p["icono"], p["tarjeta"], color=p["color"],
-                                    alto_grafico=52))
-    return html.Section(className="fila-kpis", children=[principal] + tarjetas)
+    """ID · frecuencia de los desastres · severidad de los daños y, a su lado, sus 4 pilares (todos en media luna)."""
+    principal = tarjeta_media_luna("id-kpi-0", "ID", "Índice de Desastres (0 a 10)", "medidor", destacada=True)
+    frecuencia = tarjeta_media_luna("id-kpi-1", "Frecuencia", "De los desastres (0 a 1)", "alerta")
+    severidad = tarjeta_media_luna("id-kpi-2", "Severidad", "De los daños (0 a 1)", "casa")
+    pilares = [tarjeta_media_luna(f"id-kpi-{i}", p["tarjeta"], "0 a 1", p["icono"], alto=95, color=p["color"])
+               for i, p in enumerate(PILARES.values(), start=3)]
+    return html.Div(className="bloque-kpis", children=[
+        html.Section(className="fila-kpis-id", children=[
+            principal, frecuencia,
+            html.Div(className="kpi-grupo", children=[severidad, html.Div(className="kpi-pilares", children=pilares)])]),
+        html.P([html.Strong("Nota: "), NOTA_ESCALAS_ID, " Los colores son los cuartiles de los departamentos en el año."],
+               className="nota-escala")])
 
 
 def crear_layout_id(base):
-    """título + definición · velocímetro y 5 tarjetas · [G1 ranking | G2 mapa] · [G3 evolución | G4 relación]
-       · [G5 mapa de calor]"""
-    cabecera = cabecera_pagina("", "Índice de Desastres (ID)", DEFINICION_ID, prefijo="id")
+    """título + definición · ID, frecuencia y severidad (con sus pilares) · [G1 ranking | G2 mapa]
+       · [G3 evolución | G4 relación] · [G5 mapa de calor]"""
+    cabecera = cabecera_pagina("", "Índice de Desastres (ID)", DEFINICION_ID)
     fila_1 = html.Div(className="fila fila-2", children=[
         panel("id-graf-1", "", "id-1", alto=500, numero_grafico=1, fuente=FUENTE_ID),
         panel("id-graf-2", "", "id-2", alto=500, numero_grafico=2, fuente=FUENTE_ID)])
@@ -1908,8 +2261,7 @@ def crear_layout_id(base):
               nota="cada burbuja es un departamento; su tamaño es el ID y su color, el cuartil. Las curvas "
                    "punteadas unen puntos con el mismo ID.")])
     fila_3 = html.Div(className="fila", children=[
-        panel("id-graf-5", "", "id-5", alto=580, numero_grafico=5, fuente=FUENTE_ID,
-              nota="arriba, los departamentos que pasan más años en los cuartiles más altos.")])
+        panel("id-graf-5", "", "id-5", alto=580, numero_grafico=5, fuente=FUENTE_ID)])
     contenido = html.Main(className="contenido", children=[cabecera, fila_kpis_id(), fila_1, fila_2, fila_3])
     return html.Div(className="app", children=[barra_lateral_id(base), contenido])
 
@@ -1937,19 +2289,21 @@ def barra_lateral_inform(inform):
 
 
 def tarjetas_inform():
-    """6 tarjetas: INFORM Risk (con su escala), las 3 dimensiones, amenazas naturales y promedios por grupo."""
-    tarjetas = [tarjeta_kpi("inf-kpi-0", "escudo", "INFORM Risk", destacada=True, alto_grafico=40)]
+    """INFORM Risk y al lado sus 3 componentes, todos en media luna (0 a 10)."""
+    tarjetas = [tarjeta_media_luna("inf-kpi-0", "INFORM Risk", "Riesgo de crisis y desastres (0 a 10)", "escudo",
+                                   destacada=True)]
     for i, (col, (texto, color)) in enumerate(DIMENSIONES_INFORM.items(), start=1):
-        tarjetas.append(tarjeta_kpi(f"inf-kpi-{i}", {1: "alerta", 2: "casa", 3: "escudo"}[i], texto, color=color))
-    tarjetas.append(tarjeta_kpi("inf-kpi-4", "sismo", "Amenazas naturales", color=COLOR_ROJO_PPT))
-    tarjetas.append(tarjeta_kpi("inf-kpi-5", "globo", "Promedio de América Latina (21 países)", color="#7193C9"))
-    return html.Section(className="kpis-6", children=tarjetas)
+        tarjetas.append(tarjeta_media_luna(f"inf-kpi-{i}", texto, "Componente (0 a 10)",
+                                           {1: "alerta", 2: "casa", 3: "escudo"}[i], color=color))
+    return html.Div(className="bloque-kpis", children=[
+        html.Section(className="kpis-4", children=tarjetas),
+        html.P([html.Strong("Nota: "), "el INFORM Risk y sus tres componentes van de 0 a 10; a mayor valor, mayor "
+                "riesgo. Los colores son las clases de riesgo del INFORM."], className="nota-escala")])
 
 
 def crear_layout_inform(inform):
-    """título + definición · 6 tarjetas · [G1 ranking | G2 mapa] · [G3 grupos | G4 amenazas naturales]
-       · [G5 tres dimensiones | G6 vulnerabilidad y capacidad]"""
-    cabecera = cabecera_pagina("", "Índice INFORM Risk", DEFINICION_INFORM, prefijo="inf")
+    """título + definición · INFORM Risk y sus 3 componentes · [G1 ranking | G2 mapa] · [G3 grupos | G4 componentes]"""
+    cabecera = cabecera_pagina("", "Índice INFORM Risk", DEFINICION_INFORM)
 
     def grafico(n, alto, nota=None):
         return panel(f"inf-graf-{n}", "", f"inf-{n}", alto=alto, numero_grafico=n, fuente=FUENTE_INFORM, nota=nota)
@@ -1958,13 +2312,9 @@ def crear_layout_inform(inform):
                "Belice y Surinam.")
     fila_1 = html.Div(className="fila fila-2", children=[grafico(1, 480, nota_21), grafico(2, 480)])
     fila_2 = html.Div(className="fila fila-2", children=[
-        grafico(3, 380, "INFORM 2026 clasifica al Perú (4,9) en la categoría «Medium» (Medio)."),
-        grafico(4, 380, "riesgo de cada amenaza natural en una escala de 0 a 10.")])
-    fila_3 = html.Div(className="fila fila-2", children=[
-        grafico(5, 500, "INFORM Risk = (Amenaza y exposición)^1/3 × (Vulnerabilidad)^1/3 × "
-                        "(Falta de capacidad de respuesta)^1/3."),
-        grafico(6, 500, "a mayor valor, mayor vulnerabilidad o menor capacidad de respuesta.")])
-    contenido = html.Main(className="contenido", children=[cabecera, tarjetas_inform(), fila_1, fila_2, fila_3])
+        grafico(3, 560, "INFORM 2026 clasifica al Perú (4,9) en la categoría «Medium» (Medio)."),
+        grafico(4, 560, "a mayor puntaje, mayor riesgo en los tres componentes.")])
+    contenido = html.Main(className="contenido", children=[cabecera, tarjetas_inform(), fila_1, fila_2])
     return html.Div(className="app", children=[barra_lateral_inform(inform), contenido])
 
 
@@ -2025,7 +2375,142 @@ def crear_layout_latam(latam):
     return html.Div(className="app", children=[barra_lateral_latam(latam), contenido])
 
 
-# ---- 5.8 Estilos CSS ------------------------------------------------------------------------
+# ---- 5.8 Página: Estimación de costos (simulador) ------------------------------------------
+def barra_lateral_costos(costos):
+    sectores = list(costos["modelos"])
+    return html.Aside(className="lateral", children=[
+        boton_portada(),
+        html.Div(className="marca", children=[html.Span("S/", className="marca-sigla"),
+                                              html.Span("Estimación de costos", className="marca-nombre")]),
+        html.Div(className="seleccion", children=[html.Div(id="costos-lateral-monto", className="seleccion-pais seleccion-monto"),
+                                                  html.Div(id="costos-lateral-texto", className="seleccion-dpto")]),
+        html.Div(className="controles", children=[
+            html.Label([icono("casa"), "Sector"], className="control-etiqueta"),
+            dcc.RadioItems(id="costos-sector", value=SECTOR_INICIAL, className="control-radio",
+                           options=[{"label": "Todos los sectores" if s == "Total" else s, "value": s} for s in sectores]),
+            html.Label([icono("escudo"), "Supuesto"], className="control-etiqueta"),
+            dcc.Checklist(id="costos-tope", value=["tope"], className="control-radio",
+                          options=[{"label": "Limitar cada mes al máximo ICEN ya observado (piso)", "value": "tope"}]),
+            html.Button("Volver al ICEN del Excel", id="costos-btn-reiniciar", n_clicks=0, className="boton-secundario")]),
+        html.P(f"Montos en millones de soles de {mes_texto(costos['info']['mes_base_soles'])}. {FUENTE_COSTOS}",
+               className="lateral-fuente"),
+    ])
+
+
+def control_mes(i, periodo, costos):
+    """Casilla de un mes: escribe el ICEN; abajo, el máximo observado, el aviso y el costo del mes."""
+    return html.Div(id=f"costos-mes-{i}", className="mes-control", children=[
+        html.P(mes_corto(periodo), className="mes-nombre"),
+        html.Div(className="mes-entrada", children=[
+            dcc.Input(id=f"costos-icen-{i}", type="number", value=costos["inicial"][periodo], step=0.1,
+                      min=ICEN_MIN, max=ICEN_MAX, debounce=False, className="entrada-icen"),
+            html.Span("°C", className="entrada-unidad")]),
+        html.P(f"Máx. observado: {numero(costos['maximos'][periodo], 2)}", className="mes-maximo"),
+        html.Div(id=f"costos-icen-{i}-aviso", className="mes-aviso"),
+        html.P(id=f"costos-icen-{i}-costo", className="mes-costo")])
+
+
+def cifra(etiqueta, valor, nota, clase):
+    """Monto grande en soles: hasta 999 en millones; desde 1.000, en miles de millones."""
+    grande = abs(valor) >= 1000
+    return html.Div(className=f"cifra cifra-{clase}", children=[
+        html.P(etiqueta, className="cifra-etiqueta"),
+        html.P([html.Span("S/ ", className="cifra-moneda"), numero(valor / 1000, 1) if grande else numero(valor, 0)],
+               className="cifra-valor"),
+        html.P("mil millones" if grande else "millones", className="cifra-unidad"),
+        html.P(nota, className="cifra-nota")])
+
+
+def bloque_resultado(res, res_otro, tope):
+    """Temporada normal + efecto del FEN = costo total (y la cifra del otro supuesto, para comparar)."""
+    otro = "Sin límite" if tope else "Con el límite de lo observado (piso)"
+    return html.Div(className="ecuacion", children=[
+        cifra("Temporada normal", res["normal"], "Si el ICEN fuera 0 todos los meses", "normal"),
+        html.Span("+", className="ecuacion-signo"),
+        cifra("Efecto del FEN", res["fen"],
+              f"Rango probable: {monto(res['fen_p10'])} a {monto(res['fen_p90'])} · "
+              f"{otro}: {monto(res_otro['fen'])}", "fen"),
+        html.Span("=", className="ecuacion-signo"),
+        cifra("Costo total esperado", res["total"], f"Daños de {mes_corto(res['horizonte'][0])} a "
+                                                     f"{mes_corto(res['horizonte'][-1])}", "total")])
+
+
+def pasos_metodologia(info):
+    """¿Cómo se estimó? Cuatro pasos en palabras simples."""
+    pasos = [
+        ("Daños en soles", "moneda",
+         f"Los registros del SINPAD por lluvias y sequías (2003-2025) se valorizan como cantidad dañada × costo "
+         f"unitario de reposición, en soles de {mes_texto(info['mes_base_soles'])}."),
+        ("Modelo", "indicador",
+         f"Regresión de Poisson (PPML) con {info['unidades']} zonas (departamento × región natural), mes a mes: mide "
+         f"cuánto sube el costo cuando sube el ICEN en cada macrozona (archivo fen_motor.py)."),
+        ("Validación", "escudo",
+         "Se usa la forma de la curva que mejor predice las temporadas que se dejan fuera del cálculo."),
+        ("Simulación", "tendencia",
+         f"Con tu ICEN, el modelo calcula cada zona y mes, y lo compara con una temporada normal (ICEN = 0). "
+         f"El rango sale de {SORTEOS_FEN} sorteos de los coeficientes."),
+    ]
+    return html.Div(className="pasos", children=[
+        html.Div(className="paso", children=[
+            html.Div(className="paso-cabeza", children=[html.Span(str(i), className="paso-numero"), html.H4(titulo)]),
+            html.P(texto)]) for i, (titulo, ic, texto) in enumerate(pasos, start=1)])
+
+
+def crear_layout_costos(costos):
+    """título · simulador (ICEN por mes + resultado) · [G1 costo por mes | G2 curva del ICEN]
+       · [G3 probabilidad | G4 departamentos] · G5 temporadas pasadas · ¿cómo se estimó?"""
+    info, periodos = costos["info"], costos["periodos"]
+    horizonte = f"{mes_corto(periodos[0])} – {mes_corto(periodos[-1])}"
+    unidad = f"(Millones de S/ de {mes_texto(info['mes_base_soles'])})"
+    cabecera = cabecera_pagina("", "Estimación de costos de desastres naturales", DEFINICION_COSTOS)
+    en_excel = costos["en_supuestos"] or [0, len(periodos) - 1]
+    simulador = html.Section(className="panel panel-resultado", children=[
+        html.Header(className="panel-cabecera", children=[
+            html.H3("Escribe el ICEN proyectado de cada mes", className="panel-titulo"),
+            html.P("(°C. Empieza con la hoja «supuestos_proyeccion» del Excel; los meses sin valor empiezan en 0.)",
+                   className="panel-unidad")]),
+        html.Div(className="simulador-herramientas", children=[
+            html.Div(className="herramienta herramienta-periodo", children=[
+                html.Label([icono("calendario"), "Meses que se suman"], className="control-etiqueta"),
+                dcc.RangeSlider(id="costos-horizonte", min=0, max=len(periodos) - 1, step=1,
+                                value=[min(en_excel), max(en_excel)], allowCross=False,
+                                marks={k: mes_corto(p).replace(' 20', ' ') for k, p in enumerate(periodos) if k % 3 == 0 or k == len(periodos) - 1}),
+                html.P(id="costos-horizonte-texto", className="herramienta-texto")]),
+            html.Div(className="herramienta", children=[
+                html.Label([icono("ola"), "Mismo ICEN para todo el periodo"], className="control-etiqueta"),
+                html.Div(className="herramienta-fila", children=[
+                    dcc.Input(id="costos-todos", type="number", value=2.0, step=0.1, min=ICEN_MIN, max=ICEN_MAX,
+                              className="entrada-icen entrada-chica"),
+                    html.Span("°C", className="entrada-unidad"),
+                    html.Button("Aplicar", id="costos-btn-aplicar", n_clicks=0, className="boton-play")])])]),
+        html.Div(className="meses", children=[control_mes(i, p, costos) for i, p in enumerate(periodos)]),
+        html.H4(id="costos-resultado-titulo", className="subtitulo-panel"),
+        html.Div(id="costos-resultado"),
+        html.P(id="costos-frase", className="resultado-frase")])
+    selector_mes = html.Div(className="selector-mes", children=[
+        html.Span("Mes:", className="selector-mes-etiqueta"),
+        dcc.Dropdown(id="costos-mes-curva", value=periodos[0], clearable=False, className="selector-mes-lista",
+                     options=[{"label": mes_texto(p).capitalize(), "value": p} for p in periodos])])
+    fila_1 = html.Div(className="fila fila-2", children=[
+        panel("costos-graf-1", "", "costos-1", alto=380, numero_grafico=1, unidad=unidad, fuente=FUENTE_COSTOS),
+        panel("costos-graf-2", "", "costos-2", alto=340, numero_grafico=2, unidad=unidad, fuente=FUENTE_COSTOS,
+              leyenda=selector_mes)])
+    fila_2 = html.Div(className="fila fila-2", children=[
+        panel("costos-graf-3", "", "costos-3", alto=360, numero_grafico=3, unidad="(Probabilidad acumulada)",
+              fuente=FUENTE_COSTOS),
+        panel("costos-graf-4", "", "costos-4", alto=360, numero_grafico=4, unidad=unidad, fuente=FUENTE_COSTOS)])
+    fila_3 = html.Div(className="fila", children=[
+        panel("costos-graf-5", "", "costos-5", alto=320, numero_grafico=5, unidad=unidad, fuente=FUENTE_COSTOS,
+              nota="temporadas pasadas (octubre a septiembre): costo observado en los mismos meses del año que el "
+                   "periodo elegido, en soles de hoy.")])
+    metodologia = html.Section(className="panel", children=[
+        html.Header(className="panel-cabecera", children=[html.H3("¿Cómo se estimó?", className="panel-titulo")]),
+        pasos_metodologia(info)])
+    contenido = html.Main(className="contenido", children=[cabecera, simulador, fila_1, fila_2, fila_3, metodologia])
+    return html.Div(className="app", children=[barra_lateral_costos(costos), contenido])
+
+
+# ---- 5.9 Estilos CSS ------------------------------------------------------------------------
 CSS = """
 :root{--pacifico:#0b3a66;--pacifico-medio:#1f6fb2;--niebla:#edf3f9;--azul-suave:#e3eefa;
 --superficie:#fff;--borde:#dde6f0;--tinta:#0f2f50;--tinta-2:#3f6488;--tinta-3:#6f8cab;
@@ -2064,6 +2549,7 @@ text-decoration:none;padding:8px 6px;border-radius:9px;transition:background .2s
 .marca-nombre{font-size:13px;color:rgba(255,255,255,.78)}
 .seleccion-anio{font-size:80px;line-height:.9;font-weight:800;font-stretch:125%;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
 .seleccion-pais{font-size:44px;line-height:1;font-weight:800;font-stretch:118%;letter-spacing:-.02em}
+.seleccion-monto{font-size:32px;line-height:1.1}
 .seleccion-dpto{margin-top:8px;font-size:24px;font-weight:500;color:#9fcbf2}
 .controles{background:var(--superficie);color:var(--tinta);border-radius:var(--radio);padding:16px 16px 18px;
 display:flex;flex-direction:column;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
@@ -2087,7 +2573,7 @@ border-top:1px solid rgba(255,255,255,.2);padding-top:12px}
 
 /* Encabezado de los tableros (como la presentación) */
 .cabecera{padding-bottom:14px;border-bottom:2px solid var(--rojo)}
-.cabecera-antetitulo{font-size:12.5px;font-weight:750;letter-spacing:.12em;text-transform:uppercase;color:var(--rojo);
+.cabecera-antetitulo{font-size:12.5px;font-weight:750;letter-spacing:.12em;text-transform:uppercase;color:var(--pacifico-medio);
 margin-bottom:6px}
 .cabecera-antetitulo:empty{display:none}
 .cabecera h1{font-size:32px;line-height:1.12;font-weight:750;font-stretch:112%;letter-spacing:-.015em;color:var(--azul-ppt)}
@@ -2095,6 +2581,24 @@ margin-bottom:6px}
 
 /* Tarjetas de arriba (KPI) */
 .fila-kpis{display:grid;gap:14px;grid-template-columns:minmax(0,1.35fr) repeat(5,minmax(0,1fr))}
+.bloque-kpis{display:flex;flex-direction:column;gap:6px}
+.nota-escala{font-size:12.5px;color:var(--tinta-2)}
+.fila-kpis-id{display:grid;gap:14px;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,2.3fr)}
+.kpi-luna{background:var(--superficie);border:2px solid var(--borde);border-radius:var(--radio);padding:12px 12px 10px;
+min-width:0;display:flex;flex-direction:column;gap:4px;box-shadow:var(--sombra)}
+.kpi-luna.activa{border-color:var(--pacifico-medio);background:linear-gradient(180deg,#f3f8fd 0%,#fff 55%)}
+.kpi-luna .clima-valor strong{font-size:24px}
+.kpi-grupo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:10px}
+.kpi-pilares{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.kpi-pilares .kpi-luna{padding:8px 8px 6px;gap:2px}
+.kpi-pilares .clima-sigla{font-size:13px}
+.kpi-pilares .clima-nombre{display:none}
+.kpi-pilares .kpi-icono{width:28px;height:28px}
+.kpi-pilares .kpi-icono .icono{width:16px;height:16px}
+.kpi-pilares .clima-valor strong{font-size:18px}
+.kpi-pilares .clase-chip{font-size:10.5px;padding:0 7px}
+.kpi-pilares .kpi-delta{font-size:11px;min-height:0}
+.kpis-4{display:grid;gap:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
 .kpis-6{display:grid;gap:14px;grid-template-columns:repeat(6,minmax(0,1fr))}
 .kpi{background:var(--superficie);border:1px solid var(--borde);border-radius:var(--radio);padding:14px 16px 12px;min-width:0;
 display:flex;flex-direction:column;box-shadow:var(--sombra)}
@@ -2105,7 +2609,7 @@ display:flex;flex-direction:column;box-shadow:var(--sombra)}
 .kpi-icono{width:38px;height:38px;border-radius:11px;background:var(--azul-suave);color:var(--pacifico-medio);
 display:grid;place-items:center;flex:none}
 .kpi-icono .icono{width:21px;height:21px}
-.kpi-titulo{font-size:13px;line-height:1.3;color:var(--tinta-2);font-weight:550}
+.kpi-titulo{font-size:14px;line-height:1.3;color:var(--azul-ppt);font-weight:700}
 .kpi-valor{margin-top:6px;font-size:28px;font-weight:700;font-stretch:110%;line-height:1.2;font-variant-numeric:tabular-nums;
 white-space:nowrap;color:var(--azul-ppt)}
 .kpi-unidad{font-size:14px;font-weight:600;color:var(--tinta-2)}
@@ -2121,7 +2625,8 @@ vertical-align:middle}
 box-shadow:var(--sombra);transition:box-shadow .2s ease}
 .panel:hover{box-shadow:var(--sombra-alta)}
 .panel-cabecera{padding-bottom:9px;margin-bottom:8px;border-bottom:1px solid var(--borde)}
-.panel-titulo{font-size:16.5px;font-weight:650;line-height:1.3;color:var(--rojo)}
+/* Títulos de los gráficos y cuadros: azul oscuro y negrita */
+.panel-titulo{font-size:16.5px;font-weight:750;line-height:1.3;color:var(--azul-ppt)}
 .panel-numero{font-weight:800}
 .panel-unidad{margin-top:2px;font-size:12.5px;color:var(--tinta-3)}
 .panel-unidad:empty{display:none}
@@ -2193,7 +2698,7 @@ transition:border-color .2s ease,box-shadow .2s ease}
 .clima-tarjeta:hover{box-shadow:var(--sombra-alta)}
 .clima-tarjeta.activa{border-color:var(--pacifico-medio);background:linear-gradient(180deg,#f3f8fd 0%,#fff 55%)}
 .clima-tarjeta-cabeza{display:flex;align-items:center;gap:10px}
-.clima-sigla{display:block;font-size:17px;font-weight:750;font-stretch:112%;color:var(--pacifico);line-height:1.15}
+.clima-sigla{display:block;font-size:15px;font-weight:750;color:var(--azul-ppt);line-height:1.2}
 .clima-nombre{display:block;font-size:12px;color:var(--tinta-2);line-height:1.3}
 .clima-valor{text-align:center;font-size:15px;color:var(--tinta)}
 .clima-valor strong{font-size:24px;font-weight:750;font-stretch:110%;color:var(--pacifico);font-variant-numeric:tabular-nums}
@@ -2228,11 +2733,67 @@ padding:32px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--sombra
 background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .aviso-nota-icono{color:var(--pacifico-medio);display:grid;place-items:center}
 
+/* Estimación de costos: simulador */
+.panel-resultado{border:2px solid var(--pacifico-medio);background:linear-gradient(180deg,#f5f9fe 0%,#fff 70%)}
+.simulador-herramientas{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px;margin:4px 0 12px}
+.herramienta{padding:10px 14px 12px;border-radius:14px;background:#fff;border:1px solid var(--borde)}
+.herramienta-texto{margin-top:18px;font-size:12.5px;font-weight:700;color:var(--azul-ppt)}
+.herramienta-fila{display:flex;align-items:center;gap:8px;margin-top:8px}
+.meses{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
+.mes-control{display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 6px;border-radius:14px;
+background:#fff;border:1px solid var(--borde);box-shadow:var(--sombra);transition:opacity .2s ease}
+.mes-control.mes-fuera{opacity:.38;box-shadow:none}
+.mes-nombre{font-size:13px;font-weight:750;color:var(--azul-ppt)}
+.mes-entrada{display:flex;align-items:center;gap:4px}
+.entrada-icen{width:72px;font-family:var(--fuente);font-size:20px;font-weight:800;color:var(--rojo);text-align:center;
+padding:4px 4px;border:2px solid var(--borde);border-radius:10px;background:#fff}
+.entrada-icen:focus{outline:none;border-color:var(--rojo);box-shadow:0 0 0 3px rgba(214,47,47,.15)}
+.entrada-chica{width:70px;font-size:17px}
+.entrada-unidad{font-size:13px;font-weight:700;color:var(--tinta-2)}
+.mes-maximo{font-size:10.5px;color:var(--tinta-3);text-align:center;line-height:1.25}
+.mes-costo{font-size:13px;font-weight:750;color:var(--azul-ppt);font-variant-numeric:tabular-nums}
+.aviso-chip{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;
+text-align:center;line-height:1.3}
+.aviso-fuera{background:#fdeeee;color:var(--rojo)}
+.aviso-tope{background:#fff2dc;color:#8a5200}
+.aviso-ok{background:#e2f3ea;color:#0f6b48}
+.ecuacion{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr);gap:10px;margin-top:8px;
+align-items:stretch}
+.ecuacion-signo{align-self:center;font-size:30px;font-weight:300;line-height:1;color:var(--tinta-3)}
+.cifra{border-radius:16px;padding:10px 16px;background:var(--niebla);border:1px solid var(--borde);
+display:grid;grid-template-columns:auto 1fr;grid-template-areas:"etiqueta etiqueta" "valor unidad" "nota nota";
+column-gap:8px;align-items:baseline}
+.cifra-etiqueta{grid-area:etiqueta;font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--tinta-2)}
+.cifra-valor{grid-area:valor;font-size:34px;line-height:1.1;font-weight:800;font-stretch:112%;color:var(--azul-ppt);
+font-variant-numeric:tabular-nums}
+.cifra-moneda{font-size:20px;font-weight:700}
+.cifra-unidad{grid-area:unidad;font-size:14px;font-weight:600;color:var(--tinta-2)}
+.cifra-nota{grid-area:nota;font-size:12px;line-height:1.4;color:var(--tinta-2)}
+.cifra-fen{background:#fdeeee;border-color:#f3c6c6}
+.cifra-fen .cifra-valor{color:var(--rojo)}
+.cifra-total{background:var(--azul-ppt);border-color:var(--azul-ppt);box-shadow:0 10px 26px rgba(11,42,91,.25)}
+.cifra-total .cifra-valor,.cifra-total .cifra-etiqueta,.cifra-total .cifra-unidad,.cifra-total .cifra-nota{color:#fff}
+.resultado-frase{margin-top:12px;font-size:15.5px;line-height:1.45;font-weight:700;color:var(--azul-ppt)}
+.selector-mes{display:flex;align-items:center;gap:8px;margin:2px 0 6px}
+.selector-mes-etiqueta{font-size:13px;font-weight:750;color:var(--azul-ppt)}
+.selector-mes-lista{width:220px}
+.pasos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.paso{padding:14px 16px;border-radius:14px;background:var(--niebla);border:1px solid var(--borde)}
+.paso-cabeza{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.paso-numero{width:26px;height:26px;border-radius:50%;background:var(--azul-ppt);color:#fff;display:grid;place-items:center;
+font-weight:800;font-size:13px;flex:none}
+.paso h4{font-size:15px;font-weight:750;color:var(--azul-ppt)}
+.paso p{font-size:13px;line-height:1.5;color:var(--tinta)}
+
 /* Pantallas medianas */
 @media (max-width:1280px){
 .clima-tarjetas{grid-template-columns:repeat(2,minmax(0,1fr))}
 .kpis-6,.fila-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
-.portada-tarjetas{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.fila-kpis-id,.kpis-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fila-kpis-id .kpi-grupo{grid-column:span 2}
+.portada-tarjetas{grid-template-columns:repeat(2,minmax(0,1fr))}
+.pasos{grid-template-columns:repeat(2,minmax(0,1fr))}
+.simulador{grid-template-columns:minmax(0,1fr)}}
 
 /* Celulares */
 @media (max-width:900px){
@@ -2247,6 +2808,8 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .cabecera-sub{font-size:13.5px}
 .kpis-6,.fila-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .fila-kpis .kpi-velocimetro{grid-column:span 2}
+.kpi-grupo{grid-template-columns:minmax(0,1fr)}
+.kpis-4{grid-template-columns:repeat(2,minmax(0,1fr))}
 .kpi{padding:12px 12px 8px}
 .kpi-icono{width:32px;height:32px}
 .kpi-icono .icono{width:18px;height:18px}
@@ -2266,7 +2829,12 @@ background:var(--niebla);color:var(--tinta-2);font-size:14px}
 .pagina-simple{padding:24px 12px 40px}
 .aviso{padding:22px 18px}
 .aviso h1{font-size:24px}
-.clima-tarjetas{grid-template-columns:minmax(0,1fr);gap:10px}}
+.clima-tarjetas{grid-template-columns:minmax(0,1fr);gap:10px}
+.meses{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ecuacion,.simulador-herramientas{grid-template-columns:minmax(0,1fr)}
+.ecuacion-signo{justify-self:center}
+.pasos{grid-template-columns:minmax(0,1fr)}
+.cifra-valor{font-size:28px}}
 """
 
 CSS = CSS + css_iconos()
@@ -2280,7 +2848,7 @@ PAGINA = ("<!DOCTYPE html><html lang='es'><head>{%metas%}<title>{%title%}</title
 # 6. INTERACTIVIDAD (callbacks)
 # =============================================================================
 # ---- 6.1 Navegación entre páginas ---------------------------------------------------
-def registrar_navegacion(app, clima, base_id, inform, latam):
+def registrar_navegacion(app, clima, base_id, inform, latam, costos):
     """Muestra la portada o el tablero según la dirección de la página."""
     secciones = {s["ruta"]: s for s in SECCIONES}
 
@@ -2295,9 +2863,11 @@ def registrar_navegacion(app, clima, base_id, inform, latam):
             return crear_layout_inform(inform)
         if ruta == RUTA_LATAM and latam is not None:
             return crear_layout_latam(latam)
+        if ruta == RUTA_COSTOS and costos is not None:
+            return crear_layout_costos(costos)
         if ruta in secciones:
             return pagina_en_preparacion(secciones[ruta])
-        return crear_portada(clima, base_id, inform, latam)
+        return crear_portada(clima, base_id, inform, latam, costos)
 
     # Al cambiar de página, empezar desde arriba
     app.clientside_callback("function(ruta){window.scrollTo(0, 0); return ruta;}",
@@ -2434,9 +3004,10 @@ def registrar_callbacks_id(app, base, geojson):
     serie_nacional = serie_id(base, NACIONAL)
     departamentos = set(base[COL_DPTO])
     por_nombre = {nombre_visible(d): d for d in departamentos}
-    titulos = {COL_ID: ("ID del Perú", "del ID del Perú", "del Índice de Desastres"),
-               COL_FREC: ("Índice de frecuencia", "del índice de frecuencia", "del índice de frecuencia"),
-               COL_SEV: ("Severidad global", "de la severidad global", "de la severidad global")}
+    titulos = {COL_ID: ("ID del Perú", "del ID del Perú", "del Índice de Desastres (ID)"),
+               COL_FREC: ("Frecuencia de los desastres", "de la frecuencia de los desastres",
+                          "de la frecuencia de los desastres"),
+               COL_SEV: ("Severidad de los daños", "de la severidad de los daños", "de la severidad de los daños")}
 
     # Clics en los gráficos, reproducir y reiniciar -> departamento y año
     @app.callback(Output("id-dpto", "value"), Output("id-anio", "value"),
@@ -2483,44 +3054,46 @@ def registrar_callbacks_id(app, base, geojson):
         reproducir = bool(desactivado)
         return (not reproducir), ("❚❚ Pausar" if reproducir else "▶ Reproducir")
 
-    # Barra lateral, antetítulo, velocímetro y las 5 tarjetas
+    # Barra lateral y las 7 medias lunas: ID, frecuencia, severidad y sus 4 pilares
+    columnas = [COL_ID, COL_FREC, COL_SEV] + [p["columna"] for p in PILARES.values()]
     salidas = [Output("id-lateral-anio", "children"), Output("id-lateral-dpto", "children"),
-               Output("id-antetitulo", "children"), Output("id-kpi-0-titulo", "children"),
-               Output("id-velocimetro", "figure"), Output("id-kpi-0-nota", "children")]
-    salidas += [Output(f"id-kpi-{i}-{parte}", prop) for i in range(1, 6)
-                for parte, prop in (("valor", "children"), ("nota", "children"), ("graf", "figure"))]
+               Output("id-kpi-0-titulo", "children")]
+    salidas += [Output(f"id-kpi-{i}-{parte}", prop) for i in range(len(columnas))
+                for parte, prop in (("graf", "figure"), ("valor", "children"), ("nota", "children"))]
 
     @app.callback(salidas, Input("id-dpto", "value"), Input("id-anio", "value"))
     def actualizar_resumen_id(dpto, anio):
         serie = serie_id(base, dpto)
-        corte = corte_id(base, anio, COL_ID)
-        cortes = clases_cuartil(corte[COL_ID], METODO_CUARTIL_ID)[1]
+        del_anio = base[base[COL_ANIO] == anio]
         nacional = dpto == NACIONAL
         lugar = "Perú" if nacional else nombre_visible(dpto)
-        valor, previo = serie[COL_ID].get(anio), serie[COL_ID].get(anio - 1)
-        frec, sev = serie[COL_FREC].get(anio), serie[COL_SEV].get(anio)
-        formula = f"Frecuencia {numero(frec, 2)} × Severidad global {numero(sev, 2)}"
-        if nacional:
-            titulo = f"ID promedio del Perú, {anio}"
-            nota = f"Promedio de los {len(corte)} departamentos · {formula}"
-            referencia = None
-        else:
-            fila = corte.set_index(COL_DPTO).loc[dpto]
-            titulo = f"ID de {lugar}, {anio}"
-            referencia = serie_nacional.loc[anio, COL_ID]
-            nota = (f"Puesto {int(fila[col_puesto(COL_ID)])} de {len(corte)} · Cuartil {int(fila[col_cuartil(COL_ID)])}"
-                    f" · {formula}. Marca azul: promedio del Perú ({numero(referencia, 1)})")
-        antetitulo = f"Índice 2: Índice de Desastres (ID) del Perú, {anio}" + ("" if nacional else f" · {lugar}")
-        salida = [str(anio), lugar, antetitulo, titulo, grafico_velocimetro_id(valor, previo, cortes, referencia), nota]
-        columnas = [COL_FREC] + [p["columna"] for p in PILARES.values()]
-        for i, col in enumerate(columnas, start=1):
-            actual, anterior = serie[col].get(anio), serie[col].get(anio - 1)
-            nota = [delta_texto(actual, anterior, str(anio - 1))]
-            if col == COL_FREC:
+        salida = [str(anio), lugar, "ID · Perú (promedio)" if nacional else f"ID · {lugar}"]
+        for i, col in enumerate(columnas):
+            es_id = col == COL_ID
+            tope, dec = (INDICADORES_ID[COL_ID]["tope"], 1) if es_id else (1, 2)
+            cortes = [float(c) for c in clases_cuartil(del_anio[col], METODO_CUARTIL_ID)[1]]
+            valor, previo = serie[col].get(anio), serie[col].get(anio - 1)
+            cuartil = 1 + sum(valor >= c for c in cortes) if not es_vacio(valor) else 1
+            chico = i >= 3
+            figura = grafico_media_luna(valor, [0] + cortes + [tope], [COLORES_CUARTIL[q] for q in (1, 2, 3, 4)],
+                                        etiquetas=["", "", "", ""] if chico else None,
+                                        extremos=("", "") if chico else ("BAJO", "ALTO"), decimales=dec)
+            chip = html.Span(f"Cuartil {cuartil}", className="clase-chip",
+                             style={"background": COLORES_CUARTIL[cuartil],
+                                    "color": "#fff" if cuartil >= 3 else C["tinta"]})
+            valor_html = [html.Strong(numero(valor, dec)), chip]
+            nota = [delta_texto(valor, previo, str(anio - 1), dec)]
+            if es_id:
+                if nacional:
+                    nota += [html.Br(), f"Promedio de los {len(del_anio)} departamentos"]
+                else:
+                    fila = del_anio.set_index(COL_DPTO).loc[dpto]
+                    nota += [html.Br(), f"Puesto {int(fila[col_puesto(COL_ID)])} de {len(del_anio)} departamentos"]
+            elif col == COL_FREC:
                 nota += [html.Br(), f"{numero(serie[COL_INCIDENCIAS].get(anio), 0)} incidencias registradas"]
-            else:
-                nota += [html.Br(), next(p["detalle"] for p in PILARES.values() if p["columna"] == col)]
-            salida += [numero(actual, 2), nota, grafico_sparkline(serie[col], anio, 2)]
+            elif col == COL_SEV:
+                nota += [html.Br(), "Promedio de sus 4 pilares (25 % cada uno)"]
+            salida += [figura, valor_html, nota]
         return salida
 
     # Los 5 gráficos numerados (figura, título y unidad)
@@ -2541,8 +3114,8 @@ def registrar_callbacks_id(app, base, geojson):
                 grafico_mapa_id(corte, geojson, centros, dpto, col), f"Mapa {del_mapa}, {anio}", info["unidad"],
                 grafico_evolucion_id(serie_nacional, anio, col, None if nacional else serie_id(base, dpto),
                                      nombre_visible(dpto)), titulo_3, info["unidad"],
-                grafico_relacion_id(base, dpto, anio, col), f"Relación entre frecuencia y severidad global, {anio}",
-                "(Índices de 0 a 1)",
+                grafico_relacion_id(base, dpto, anio, col),
+                f"Relación entre la frecuencia de los desastres y la severidad de los daños, {anio}", "(De 0 a 1)",
                 grafico_calor_id(base, dpto, anio, col),
                 f"{nombre} por departamento y año, {periodo}", "(Cuartil del año)")
 
@@ -2556,11 +3129,10 @@ def registrar_callbacks_inform(app, inform):
     def puesto_alc(col, iso):
         return int((alc[col] > alc.loc[iso, col]).sum()) + 1
 
-    # Clic en el ranking, el mapa o el gráfico de dimensiones -> país; botón -> Perú
+    # Clic en el ranking o en el mapa -> país; botón -> Perú
     @app.callback(Output("inf-pais", "value"),
                   Input("inf-graf-1", "clickData"), Input("inf-graf-2", "clickData"),
-                  Input("inf-graf-5", "clickData"), Input("inf-btn-reiniciar", "n_clicks"),
-                  prevent_initial_call=True)
+                  Input("inf-btn-reiniciar", "n_clicks"), prevent_initial_call=True)
     def sincronizar_inform(*_):
         origen = ctx.triggered_id
         if origen == "inf-btn-reiniciar":
@@ -2570,37 +3142,34 @@ def registrar_callbacks_inform(app, inform):
         iso = punto.get("location") if origen == "inf-graf-2" else por_nombre.get(punto.get("y"))
         return iso if iso in alc.index else no_update
 
-    # Barra lateral, antetítulo y las 6 tarjetas
-    @app.callback([Output("inf-lateral-pais", "children"), Output("inf-antetitulo", "children"),
-                   Output("inf-kpi-0-graf", "figure")]
-                  + [Output(f"inf-kpi-{i}-{parte}", "children") for i in range(6) for parte in ("titulo", "valor", "nota")],
+    # Barra lateral, INFORM Risk y sus 3 componentes (medias lunas con las clases del INFORM)
+    limites = [c[1] for c in CLASES_INFORM] + [10]
+    colores = [c[2] for c in CLASES_INFORM]
+    etiquetas = [c[0].upper().replace("MUY ", "MUY<br>") for c in CLASES_INFORM]
+
+    @app.callback([Output("inf-lateral-pais", "children")]
+                  + [Output(f"inf-kpi-{i}-{parte}", prop) for i in range(4)
+                     for parte, prop in (("titulo", "children"), ("graf", "figure"), ("valor", "children"),
+                                         ("nota", "children"))],
                   Input("inf-pais", "value"))
     def actualizar_resumen_inform(iso):
         fila = inform.loc[iso]
-        valor = fila["INFORM RISK"]
-        clase, color = clase_inform(valor)
-        salida = [fila["NOMBRE"], f"Índice 1: INFORM Risk — {fila['NOMBRE']} en América Latina y el Caribe, {ANIO_INFORM}",
-                  grafico_escala_inform(valor)]
-        chip = html.Span(clase, className="clase-chip",
-                         style={"background": color, "color": "#fff" if clase in ("Alto", "Muy alto") else C["tinta"]})
-        salida += [f"INFORM Risk de {fila['NOMBRE']}", [numero(valor, 1), chip],
-                   f"Puesto {puesto_alc('INFORM RISK', iso)} de {len(alc)} en la región · "
-                   f"{int(fila['Rank'])} de {len(inform)} en el mundo"]
-        for col, (texto, _) in DIMENSIONES_INFORM.items():
-            salida += [texto, numero(fila[col], 1),
-                       f"Puesto {puesto_alc(col, iso)} de {len(alc)} · promedio de la región: {numero(alc[col].mean(), 1)}"]
-        amenazas = pd.Series({n: fila[c] for c, n in AMENAZAS_NATURALES.items()}).sort_values(ascending=False)
-        salida += ["Amenazas naturales", numero(fila["Natural"], 1),
-                   f"La mayor: {amenazas.index[0].lower()} ({numero(amenazas.iloc[0], 1)}) · "
-                   f"región: {numero(alc['Natural'].mean(), 1)}"]
-        promedios = {g: inform.loc[i, "INFORM RISK"].mean() for g, i in grupos.items()}
-        salida += ["INFORM Risk promedio de la región (21 países)", numero(alc["INFORM RISK"].mean(), 1),
-                   f"Emergentes: {numero(promedios['Economías emergentes'], 1)} · "
-                   f"avanzadas: {numero(promedios['Economías avanzadas'], 1)}"]
+        salida = [fila["NOMBRE"]]
+        for i, col in enumerate(["INFORM RISK"] + list(DIMENSIONES_INFORM)):
+            valor = fila[col]
+            clase, color = clase_inform(valor)
+            chip = html.Span(clase, className="clase-chip",
+                             style={"background": color, "color": "#fff" if clase in ("Alto", "Muy alto") else C["tinta"]})
+            titulo = f"INFORM Risk · {fila['NOMBRE']}" if i == 0 else DIMENSIONES_INFORM[col][0]
+            nota = f"Puesto {puesto_alc(col, iso)} de {len(alc)} en la región · región: {numero(alc[col].mean(), 1)}"
+            if i == 0:
+                nota = [nota, html.Br(), f"Puesto {int(fila['Rank'])} de {len(inform)} en el mundo"]
+            salida += [titulo, grafico_media_luna(valor, limites, colores, etiquetas, ("BAJO", "ALTO")),
+                       [html.Strong(numero(valor, 1)), chip], nota]
         return salida
 
-    # Los 6 gráficos numerados (figura, título y unidad)
-    @app.callback([Output(f"inf-graf-{n}{parte}", prop) for n in range(1, 7)
+    # Los 4 gráficos numerados (figura, título y unidad)
+    @app.callback([Output(f"inf-graf-{n}{parte}", prop) for n in range(1, 5)
                    for parte, prop in (("", "figure"), ("-titulo", "children"), ("-unidad", "children"))],
                   Input("inf-pais", "value"), Input("inf-indicador", "value"))
     def actualizar_graficos_inform(iso, col):
@@ -2615,14 +3184,9 @@ def registrar_callbacks_inform(app, inform):
                 grafico_mapa_inform(inform, iso, col), f"{mapa}, {ANIO_INFORM}", "(Nivel de riesgo)",
                 grafico_grupos_inform(inform, iso, col),
                 f"{titulo}: América Latina frente a economías avanzadas y emergentes, {ANIO_INFORM}", puntaje,
-                grafico_amenazas_inform(inform, iso),
-                f"Amenazas naturales en {pais} frente al promedio de América Latina, {ANIO_INFORM}", puntaje,
-                grafico_dimensiones_inform(alc, iso),
-                f"Las tres dimensiones del INFORM Risk en América Latina y el Caribe, {ANIO_INFORM}",
-                "(Puntaje de 0 a 10; la raya negra es el INFORM Risk)",
-                grafico_subcomponentes_inform(inform, iso),
-                f"Vulnerabilidad y falta de capacidad de respuesta en {pais}, {ANIO_INFORM}",
-                "(Puntaje de 0 a 10; el rombo es el promedio de América Latina)")
+                grafico_componentes_inform(inform, iso),
+                f"Componentes del INFORM Risk en {pais} frente al promedio de América Latina, {ANIO_INFORM}",
+                "(Puntaje de 0 a 10; el rombo es el promedio de los 21 países)")
 
 
 # ---- 6.5 América Latina ----------------------------------------------------------------------
@@ -2685,7 +3249,7 @@ def registrar_callbacks_latam(app, latam):
         def puesto(col):
             return f"Puesto {int((tabla[col] > fila[col]).sum()) + 1} de {n_paises} países"
 
-        salida = [pais, texto_periodo(*periodo).replace("–", "-"), TEXTOS_LATAM[ind]["indicador"]]
+        salida = [pais, texto_periodo(*periodo).replace("–", "-"), ""]
         if ind == "eventos":
             salida += [f"Desastres naturales en {donde}, {texto}",
                        f"¿Qué mide? {TEXTOS_LATAM[ind]['que_mide']} {n_paises} países de América Latina y el Caribe."]
@@ -2713,7 +3277,7 @@ def registrar_callbacks_latam(app, latam):
             salida += [f"Costo económico de los desastres en {donde}, {texto}",
                        f"¿Qué mide? {TEXTOS_LATAM[ind]['que_mide']}"]
             nota = [html.Span(puesto("costo_pbi")), html.Br(),
-                    html.Span(f"US$ {numero(fila['dano_miles'] / 1000, 0)} millones · "
+                    html.Span(f"{monto(fila['dano_miles'] / 1000, 'US$')} · "
                               f"promedio {en_zona.get(zona, 'en su zona')}: {numero(promedio_zona, 1)} %")]
             salida += ["Costo económico", [numero(fila["costo_pbi"], 1), html.Span(" % del PBI", className="kpi-unidad")],
                        nota]
@@ -2767,9 +3331,94 @@ def registrar_callbacks_latam(app, latam):
                 f"Costo de los desastres en {donde} por tipo y subtipo, {texto}", "(% del PBI)",
                 grafico_anual_pais(latam, pais, p0, p1, "costo"),
                 f"Costo económico anual de los desastres en {donde}, {texto}",
-                "(Millones de US$, ajustados por inflación)")
+                "(Miles de millones de US$, ajustados por inflación)")
 
 
+
+
+# ---- 6.6 Estimación de costos (simulador) --------------------------------------------------------
+def registrar_callbacks_costos(app, costos):
+    periodos = costos["periodos"]
+    n = len(periodos)
+    casillas = [Input(f"costos-icen-{i}", "value") for i in range(n)]
+    en_excel = costos["en_supuestos"] or [0, n - 1]
+
+    def leer(valores, tope):
+        """ICEN de cada mes (casilla vacía = 0) y el que se usa (con o sin tope)."""
+        icen = {p: float(v) if v is not None else 0.0 for p, v in zip(periodos, valores)}
+        return icen, icen_usado(costos, icen, bool(tope))
+
+    def meses_de(rango):
+        return periodos[int(rango[0]):int(rango[1]) + 1]
+
+    # Botones: volver al ICEN del Excel, o poner el mismo ICEN en todos los meses del periodo
+    @app.callback([Output(f"costos-icen-{i}", "value") for i in range(n)] + [Output("costos-horizonte", "value")],
+                  Input("costos-btn-reiniciar", "n_clicks"), Input("costos-btn-aplicar", "n_clicks"),
+                  State("costos-todos", "value"), State("costos-horizonte", "value"),
+                  [State(f"costos-icen-{i}", "value") for i in range(n)], prevent_initial_call=True)
+    def botones_costos(_r, _a, todos, rango, *valores):
+        if ctx.triggered_id == "costos-btn-reiniciar":
+            return [costos["inicial"][p] for p in periodos] + [[min(en_excel), max(en_excel)]]
+        if todos is None:
+            return [no_update] * (n + 1)
+        a, b = int(rango[0]), int(rango[1])
+        return [todos if a <= i <= b else v for i, v in enumerate(valores)] + [no_update]
+
+    # Casillas, resultado y gráficos 1, 3, 4 y 5
+    salidas = [Output("costos-lateral-monto", "children"), Output("costos-lateral-texto", "children"),
+               Output("costos-horizonte-texto", "children"), Output("costos-resultado-titulo", "children"),
+               Output("costos-resultado", "children"), Output("costos-frase", "children")]
+    salidas += [Output(f"costos-icen-{i}-{parte}", "children") for i in range(n) for parte in ("costo", "aviso")]
+    salidas += [Output(f"costos-mes-{i}", "className") for i in range(n)]
+    salidas += [Output(f"costos-graf-{g}{parte}", prop) for g in (1, 3, 4, 5)
+                for parte, prop in (("", "figure"), ("-titulo", "children"))]
+
+    @app.callback(salidas, casillas + [Input("costos-horizonte", "value"), Input("costos-sector", "value"),
+                                       Input("costos-tope", "value")])
+    def actualizar_costos(*args):
+        *valores, rango, sector, tope = args
+        tope = bool(tope)
+        horizonte = meses_de(rango)
+        icen, usado = leer(valores, tope)
+        res = resumen_simulacion(costos, sector, usado, horizonte)
+        res_otro = resumen_simulacion(costos, sector, icen_usado(costos, icen, not tope), horizonte)
+        nombre = "todos los sectores" if sector == "Total" else sector.lower()
+        periodo_txt = f"{mes_corto(horizonte[0])} – {mes_corto(horizonte[-1])}"
+        veces = res["total"] / res["normal"] if res["normal"] else np.nan
+        frase = (f"Con este ICEN, de {mes_corto(horizonte[0])} a {mes_corto(horizonte[-1])} el FEN agregaría "
+                 f"{soles(res['fen'])} a los daños de {nombre}: {numero(veces, 1)} veces lo de una temporada normal.")
+        salida = [monto(res["fen"]), f"efecto del FEN · {periodo_txt}",
+                  f"{periodo_txt} · {len(horizonte)} meses", f"Resultado: {nombre}, {periodo_txt}",
+                  bloque_resultado(res, res_otro, tope), frase]
+        clases = []
+        for p in periodos:
+            fuera = icen[p] > costos["maximos"][p]
+            if fuera and tope:
+                aviso = html.Span(f"Se usa {numero(costos['maximos'][p], 2)}", className="aviso-chip aviso-tope")
+            elif fuera:
+                aviso = html.Span("Fuera de lo observado", className="aviso-chip aviso-fuera")
+            else:
+                aviso = html.Span("Dentro de lo observado", className="aviso-chip aviso-ok")
+            salida += [monto(res["por_mes"].loc[p, "esperado"]), aviso]
+            clases.append("mes-control" + ("" if p in horizonte else " mes-fuera"))
+        salida += clases
+        salida += [grafico_costo_mes(costos, res, usado), f"Costo esperado por mes: {nombre}, {periodo_txt}",
+                   grafico_probabilidad(costos, sector, res), f"¿Qué tan probable? Costo total del periodo: {nombre}",
+                   grafico_departamentos(res), f"¿Dónde? Costo esperado por departamento: {nombre}",
+                   grafico_temporadas(costos, sector, res),
+                   f"Comparación con temporadas pasadas, mismos meses: {nombre}"]
+        return salida
+
+    # Gráfico 2: curva del ICEN del mes elegido
+    @app.callback(Output("costos-graf-2", "figure"), Output("costos-graf-2-titulo", "children"),
+                  casillas + [Input("costos-sector", "value"), Input("costos-tope", "value"),
+                              Input("costos-mes-curva", "value")])
+    def actualizar_curva(*args):
+        *valores, sector, tope, periodo = args
+        icen, _ = leer(valores, tope)
+        nombre = "todos los sectores" if sector == "Total" else sector.lower()
+        return (grafico_curva_icen(costos, sector, periodo, icen[periodo], bool(tope)),
+                f"Curva del costo según el ICEN: {mes_texto(periodo)}, {nombre}")
 
 
 # =============================================================================
@@ -2780,6 +3429,7 @@ CLIMA = cargar_clima()
 BASE_ID = cargar_id()
 INFORM = cargar_inform()
 LATAM = cargar_latam()
+COSTOS = cargar_costos()
 
 app = Dash(__name__, title=f"{TITULO_PORTADA} | Perú", external_stylesheets=[URL_FUENTES],
            suppress_callback_exceptions=True,  # las páginas se dibujan según la dirección
@@ -2794,7 +3444,7 @@ def imagen_portada():  # la imagen de la portada se sirve desde la carpeta de ap
 
 
 app.layout = crear_marco()
-paginas = [crear_marco(), crear_portada(CLIMA, BASE_ID, INFORM, LATAM)]
+paginas = [crear_marco(), crear_portada(CLIMA, BASE_ID, INFORM, LATAM, COSTOS)]
 if CLIMA is not None:
     paginas.append(crear_layout_clima(CLIMA))
 if BASE_ID is not None:
@@ -2803,9 +3453,11 @@ if INFORM is not None:
     paginas.append(crear_layout_inform(INFORM))
 if LATAM is not None:
     paginas.append(crear_layout_latam(LATAM))
+if COSTOS is not None:
+    paginas.append(crear_layout_costos(COSTOS))
 app.validation_layout = html.Div(paginas)
 
-registrar_navegacion(app, CLIMA, BASE_ID, INFORM, LATAM)
+registrar_navegacion(app, CLIMA, BASE_ID, INFORM, LATAM, COSTOS)
 if CLIMA is not None:
     registrar_callbacks_clima(app, CLIMA)
 if BASE_ID is not None:
@@ -2814,6 +3466,8 @@ if INFORM is not None:
     registrar_callbacks_inform(app, INFORM)
 if LATAM is not None:
     registrar_callbacks_latam(app, LATAM)
+if COSTOS is not None:
+    registrar_callbacks_costos(app, COSTOS)
 
 if __name__ == "__main__":
     # En JupyterLab: "external" muestra el enlace http://127.0.0.1:8050 (ábrelo en el navegador).
