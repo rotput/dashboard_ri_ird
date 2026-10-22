@@ -9,7 +9,7 @@
 #    /latam                Estadísticas de América Latina    <- EMDAT_LATAM.xlsx
 #    /estimacion-costos    Estimación de costos de desastres    <- BASE_FEN_CONSOLIDADA.xlsx
 #  Archivos junto a app.py: ICEM.xlsx, IRD_RESULTADO.xlsx, inform.xlsx, EMDAT_LATAM.xlsx,
-#                           BASE_FEN_CONSOLIDADA.xlsx, portado.jpg y (opcional) fen_cache.pkl
+#                           BASE_FEN_CONSOLIDADA.xlsx, portada.jpg y (opcional) fen_cache.pkl
 #  En Render, comando de inicio:  gunicorn app:server --preload --timeout 180
 #
 #  Pega todo en UNA celda de JupyterLab y ejecútala. Se abre en: http://127.0.0.1:8050
@@ -83,7 +83,7 @@ CLAVE_GEOJSON = "properties.NOMBDEP"
 TITULO_PORTADA = "Seguimiento de Indicadores e Índices de Desastres"
 SUBTITULO_PORTADA = ("Tableros para seguir las amenazas climáticas, los índices de desastres, "
                      "la situación de América Latina y el costo de los desastres.")
-ARCHIVO_PORTADA = "portado.jpg"      # imagen de fondo de la portada (junto a app.py)
+ARCHIVO_PORTADA = "portada.jpg"      # imagen de fondo de la portada (junto a app.py)
 RUTA_CLIMA = "/indices-mensuales"
 RUTA_ID = "/indice-desastres"
 RUTA_INFORM = "/inform-risk"
@@ -3032,7 +3032,7 @@ color:var(--tinta-3)}
 /* Portada */
 .portada{min-height:100vh;display:flex;flex-direction:column}
 .portada-hero{position:relative;overflow:hidden;color:#fff;padding:80px 0 190px;min-height:74vh;
-background:#0b3a66 url("/portado.jpg") center 35%/cover no-repeat}
+background:#0b3a66 url("/portada.jpg") center 35%/cover no-repeat}
 .portada-hero::before{content:"";position:absolute;inset:0;pointer-events:none;
 background:linear-gradient(180deg,rgba(237,243,249,0) 62%,#edf3f9 100%),
 linear-gradient(100deg,rgba(6,30,54,.88) 0%,rgba(6,30,54,.55) 42%,rgba(6,30,54,0) 72%)}
