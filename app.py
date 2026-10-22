@@ -78,12 +78,12 @@ URL_GEOJSON = ("https://raw.githubusercontent.com/juaneladio/peru-geojson/"
 RUTA_GEOJSON = os.path.join(CARPETA, "peru_departamental.geojson")
 CLAVE_GEOJSON = "properties.NOMBDEP"
 
-# ---- 1.2 Portada ------------------------------------------------------------------
+# ---- 1.2  ------------------------------------------------------------------
 # "lista": True = el tablero ya funciona; False = muestra "En preparación".
-TITULO_PORTADA = "Seguimiento de Indicadores e Índices de Desastres"
-SUBTITULO_PORTADA = ("Tableros para seguir las amenazas climáticas, los índices de desastres, "
+TITULO_ = "Seguimiento de Indicadores e Índices de Desastres"
+SUBTITULO_ = ("Tableros para seguir las amenazas climáticas, los índices de desastres, "
                      "la situación de América Latina y el costo de los desastres.")
-ARCHIVO_PORTADA = "portada.jpg"      # imagen de fondo de la portada (junto a app.py)
+ARCHIVO_PORTADA = "portado.jpg"      # imagen de fondo de la portada (junto a app.py)
 RUTA_CLIMA = "/indices-mensuales"
 RUTA_ID = "/indice-desastres"
 RUTA_INFORM = "/inform-risk"
