@@ -164,7 +164,7 @@ FUENTE_CLIMA = "Fuente: IMARPE (SIOFEN)."
 # Texto debajo del título de los gráficos según la unidad del índice
 UNIDAD_TEXTO_CLIMA = {"°C": "(Anomalía en grados Celsius, °C)", "": "(Índice estandarizado, sin unidad)"}
 # Mapa de cada índice (al lado del criterio): archivo .jpg junto a app.py
-IMAGENES_CLIMA = {"ICEN": "ICEN.jpg", "ITCP": "ITCP.jpg", "LABCOS": "LABCOS.jpg", "ENOS": "ENOS.jpg"}
+IMAGENES_CLIMA = {"ICEN": "ICEN.jpeg", "ITCP": "ITCP.jpeg", "LABCOS": "LABCOS.jpeg", "ENOS": "ENOS.jpeg"}
 FUENTE_CLIMA_CORTA = "Fuente: IMARPE (SIOFEN)."   # la que va debajo de cada gráfico
 
 # ---- 1.4 Índice de Desastres (archivo IRD_RESULTADO.xlsx, hoja IRD_ANUAL) --------
