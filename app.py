@@ -94,7 +94,7 @@ SECCIONES = [
      "titulo": "Índices climáticos mensuales",
      "descripcion": "Seguimiento mes a mes de los índices que miden si el mar está en condición "
                     "cálida, neutra o fría.",
-     "etiquetas": ["ICEN", "ITCP", "LABCOS", "EHNOS"]},
+     "etiquetas": ["ICEN", "ITCP", "LABCOS", "ENOS"]},
     {"ruta": RUTA_ID, "icono": "medidor", "lista": True,
      "titulo": "Índices de desastres",
      "descripcion": "Índice de Desastres (ID) de los 25 departamentos del Perú e índice INFORM Risk "
@@ -151,14 +151,20 @@ INDICES_CLIMA = {
                               "peruana presentan condiciones más cálidas o más frías de lo habitual."),
                "calidas": [("Muy fuerte", 2.77), ("Fuerte", 1.37), ("Moderada", 0.78), ("Débil", 0.27)],
                "frias": [("Débil", -0.78), ("Moderada", -1.10), ("Fuerte", -1.31)]},
-    # EHNOS: se usa el criterio del MEI v2 (±0,5). Si su criterio es otro, cámbialo aquí.
-    "EHNOS": {"columna": "EHNOS", "nombre": "Índice EHNOS", "decimales": 2, "unidad": "°C",
-              "definicion": ("Índice asociado al EHNOS (El Niño-Oscilación del Sur), un fenómeno climático que combina "
-                             "variaciones del océano y la atmósfera en el Pacífico tropical y cuyos efectos pueden "
-                             "extenderse a distintas regiones del mundo."),
+    # ENOS: índice estandarizado (sin unidad), criterio del MEI v2 (±0,5). En el Excel la columna puede
+    #   llamarse ENOS o EHNOS: se aceptan las dos.
+    "ENOS": {"columna": "ENOS", "otras_columnas": ["EHNOS"], "nombre": "Índice ENOS", "decimales": 2, "unidad": "",
+             "definicion": ("Índice estandarizado que sigue las fases de El Niño-Oscilación del Sur (ENOS) en el "
+                            "Pacífico tropical. Combina cinco variables del océano y la atmósfera: presión al nivel "
+                            "del mar, temperatura superficial del mar, vientos zonales y meridionales, y radiación "
+                            "de onda larga saliente."),
               "calidas": [("Cálida", 0.5)], "frias": [("Fría", -0.5)], "incluye_limite": True},
 }
 FUENTE_CLIMA = "Fuente: IMARPE (SIOFEN)."
+# Texto debajo del título de los gráficos según la unidad del índice
+UNIDAD_TEXTO_CLIMA = {"°C": "(Anomalía en grados Celsius, °C)", "": "(Índice estandarizado, sin unidad)"}
+# Mapa de cada índice (al lado del criterio): archivo .jpg junto a app.py
+IMAGENES_CLIMA = {"ICEN": "ICEN.jpg", "ITCP": "ITCP.jpg", "LABCOS": "LABCOS.jpg", "ENOS": "ENOS.jpg"}
 FUENTE_CLIMA_CORTA = "Fuente: IMARPE (SIOFEN)."   # la que va debajo de cada gráfico
 
 # ---- 1.4 Índice de Desastres (archivo IRD_RESULTADO.xlsx, hoja IRD_ANUAL) --------
@@ -241,6 +247,10 @@ SUBCOMPONENTES_INFORM = {
 CLASES_INFORM = [  # (nombre, desde, color)
     ("Muy bajo", 0.0, "#FBF7CF"), ("Bajo", 2.35, "#F2F089"), ("Medio", 3.55, "#FD8D3C"),
     ("Alto", 5.35, "#E31A1C"), ("Muy alto", 6.75, "#800026")]
+# El INFORM Risk usa solo 4 clases, como en la presentación (Muy bajo se junta con Bajo).
+# Sus 3 componentes siguen con las 5 clases de arriba.
+CLASES_INFORM_RISK = [
+    ("Bajo", 0.0, "#F2F089"), ("Medio", 3.55, "#FD8D3C"), ("Alto", 5.35, "#E31A1C"), ("Muy alto", 6.75, "#800026")]
 # Los 21 países de América Latina y el Caribe del Gráfico N.º 10 de la presentación
 PAISES_INFORM = {
     "HTI": "Haití", "VEN": "Venezuela", "GTM": "Guatemala", "ECU": "Ecuador", "HND": "Honduras",
@@ -420,7 +430,9 @@ def cargar_clima():
     df["mes"] = pd.to_numeric(df["mes"], errors="coerce")
     df = df.dropna(subset=["anio", "mes"]).astype({"anio": int, "mes": int})
     for clave, cfg in INDICES_CLIMA.items():
-        original = df[cfg["columna"]]
+        nombres = [cfg["columna"]] + cfg.get("otras_columnas", [])
+        columna = next((c for c in nombres if c in df.columns), cfg["columna"])
+        original = df[columna]
         df[clave] = a_numero(original)
         df[clave + "_prelim"] = original.astype(str).str.contains(r"\*", regex=True)
     df["fecha"] = pd.to_datetime(dict(year=df["anio"], month=df["mes"], day=1))
@@ -598,12 +610,18 @@ def cargar_inform():
     return df.set_index("ISO3")
 
 
-def clase_inform(valor):
+def clases_inform(col=None):
+    """Clases de riesgo del indicador: 4 para el INFORM Risk y 5 para sus componentes."""
+    return CLASES_INFORM_RISK if col == "INFORM RISK" else CLASES_INFORM
+
+
+def clase_inform(valor, col=None):
     """(nombre, color) de la clase de riesgo de un puntaje de 0 a 10."""
     if es_vacio(valor):
         return "Sin dato", C["contexto"]
-    nombre, color = CLASES_INFORM[0][0], CLASES_INFORM[0][2]
-    for n, desde, c in CLASES_INFORM:
+    clases = clases_inform(col)
+    nombre, color = clases[0][0], clases[0][2]
+    for n, desde, c in clases:
         if valor >= desde:
             nombre, color = n, c
     return nombre, color
@@ -1745,9 +1763,9 @@ def grafico_escala_inform(valor):
     return fig
 
 
-def leyenda_clases_inform(fig, presentes=None):
+def leyenda_clases_inform(fig, presentes=None, col=None):
     """Agrega a la figura la leyenda de las clases del INFORM (de mayor a menor riesgo)."""
-    for nombre, _, color in reversed(CLASES_INFORM):
+    for nombre, _, color in reversed(clases_inform(col)):
         if presentes is None or nombre in presentes:
             fig.add_bar(x=[None], y=[None], name=nombre, marker_color=color, orientation="h")
 
@@ -1755,7 +1773,7 @@ def leyenda_clases_inform(fig, presentes=None):
 def grafico_ranking_inform(alc, iso_sel, col):
     """Gráfico 1: los 21 países de mayor a menor, con el color de su clase de riesgo."""
     datos = alc.sort_values(col)
-    clases = [clase_inform(v) for v in datos[col]]
+    clases = [clase_inform(v, col) for v in datos[col]]
     sel = (datos.index == iso_sel)
     fig = go.Figure(go.Bar(
         y=datos["NOMBRE"], x=datos[col], orientation="h", showlegend=False,
@@ -1763,7 +1781,7 @@ def grafico_ranking_inform(alc, iso_sel, col):
         text=[numero(v, 1) for v in datos[col]], textposition="outside", cliponaxis=False,
         textfont=dict(size=10.5, color=COLOR_AZUL_PPT), customdata=[[c[0]] for c in clases],
         hovertemplate="<b>%{y}</b>: %{text} · %{customdata[0]}<extra></extra>"))
-    leyenda_clases_inform(fig, {c[0] for c in clases})
+    leyenda_clases_inform(fig, {c[0] for c in clases}, col)
     fig.update_layout(bargap=0.2, barmode="overlay", margin=dict(l=4, r=8, t=30, b=4), legend=dict(y=1.02),
                       xaxis=dict(visible=False, range=[0, 10]),
                       yaxis=dict(showgrid=False, showline=True, linecolor=C["borde"], tickvals=list(datos["NOMBRE"]),
@@ -1775,9 +1793,9 @@ def grafico_ranking_inform(alc, iso_sel, col):
 def grafico_mapa_inform(inform, iso_sel, col):
     """Gráfico 2: mapa de la región con el nivel de riesgo (clases del INFORM)."""
     region = inform.loc[[i for i in list(PAISES_INFORM) + list(PAISES_INFORM_MAPA) if i in inform.index]]
-    clases = pd.Series([clase_inform(v)[0] for v in region[col]], index=region.index)
+    clases = pd.Series([clase_inform(v, col)[0] for v in region[col]], index=region.index)
     fig = go.Figure()
-    for nombre, _, color in reversed(CLASES_INFORM):
+    for nombre, _, color in reversed(clases_inform(col)):
         sub = region[clases == nombre]
         if sub.empty:
             continue
@@ -1827,9 +1845,9 @@ def grafico_grupos_inform(inform, iso_sel, col):
 
 
 def grafico_componentes_inform(inform, iso_sel):
-    """Gráfico 4: qué hay dentro de cada componente del INFORM Risk en el país, frente al promedio de la región.
+    """Gráfico 4: qué hay dentro de cada componente del INFORM Risk en el país.
     Los tres componentes van en el mismo sentido: a mayor puntaje, mayor riesgo."""
-    fila, alc = inform.loc[iso_sel], tabla_alc(inform)
+    fila = inform.loc[iso_sel]
     columnas = [c for c in SUBCOMPONENTES_INFORM if c in inform.columns]
     grupos = [SUBCOMPONENTES_INFORM[c][0] for c in columnas]
     nombres = [SUBCOMPONENTES_INFORM[c][1] for c in columnas]
@@ -1840,11 +1858,7 @@ def grafico_componentes_inform(inform, iso_sel):
                 marker_color=[colores[g] for g in grupos], text=[numero(v, 1) for v in valores],
                 textposition="outside", cliponaxis=False, textfont=dict(size=11, color=COLOR_AZUL_PPT),
                 hovertemplate="<b>%{y}</b>: %{x:.1f}<extra></extra>")
-    fig.add_scatter(y=[grupos, nombres], x=[alc[c].mean() for c in columnas], mode="markers",
-                    name="Promedio de América Latina (21 países)",
-                    marker=dict(symbol="diamond", size=10, color=C["tinta"], line=dict(color="white", width=1)),
-                    hovertemplate="<b>%{y}</b> · promedio de la región: %{x:.1f}<extra></extra>")
-    fig.update_layout(bargap=0.3, margin=dict(l=4, r=8, t=30, b=4), legend=dict(y=1.02),
+    fig.update_layout(bargap=0.3, margin=dict(l=4, r=8, t=10, b=4), showlegend=False,
                       xaxis=dict(range=[0, 10.8], showgrid=True, gridcolor=C["rejilla"], showline=False,
                                  title="Puntaje de 0 a 10"),
                       yaxis=dict(autorange="reversed", tickfont=dict(size=11, color=C["tinta"])))
@@ -1932,10 +1946,26 @@ def grafico_periodos_latam(latam, pais_sel):
     return fig
 
 
-def grafico_dispersion_latam(latam, a0, a1):
+def anual_latam(latam, a0, a1):
+    """Número de desastres y costo (miles de millones de US$) de cada año en la región."""
     e = eventos_periodo(latam, a0, min(a1, ULTIMO_ANIO_COSTO))
     anual = e.groupby("anio").agg(n=("id", "size"), costo=("dano_miles_usd", "sum"))
-    anual["costo"] = anual["costo"] / 1e6  # miles de millones de US$
+    anual["costo"] = anual["costo"] / 1e6
+    return anual
+
+
+def nota_correlacion_latam(latam, a0, a1):
+    """Nota del Gráfico 3 (costo): la correlación va aquí y no dentro del gráfico."""
+    anual = anual_latam(latam, a0, a1)
+    if len(anual) < 3:
+        return ""
+    r = np.corrcoef(anual["n"], anual["costo"])[0, 1]
+    return [html.Strong("Nota: "), f"correlación entre el número de desastres y el costo anual: {numero(r, 2)}. "
+            "La línea punteada es la tendencia.", html.Br()]
+
+
+def grafico_dispersion_latam(latam, a0, a1):
+    anual = anual_latam(latam, a0, a1)
     if len(anual) < 3:
         return figura_vacia("Elige un periodo más largo para ver la relación.")
     fig = go.Figure()
@@ -1951,10 +1981,6 @@ def grafico_dispersion_latam(latam, a0, a1):
     for anio in anual["costo"].nlargest(3).index:
         fig.add_annotation(x=anual.loc[anio, "n"], y=anual.loc[anio, "costo"], text=str(anio), showarrow=False,
                            yshift=14, font=dict(size=11, color=C["tinta"]))
-    r = np.corrcoef(anual["n"], anual["costo"])[0, 1]
-    fig.add_annotation(x=0.01, y=0.98, xref="paper", yref="paper", xanchor="left", yanchor="top", showarrow=False,
-                       text=f"Correlación: <b>{numero(r, 2)}</b>", font=dict(size=12, color=C["tinta"]),
-                       bgcolor=C["niebla"], borderpad=6)
     fig.update_layout(margin=dict(l=4, r=4, t=8, b=4), hovermode="closest",
                       xaxis=dict(title="N.º de desastres anuales", showgrid=True, gridcolor=C["rejilla"]),
                       yaxis=dict(title="Costo anual (miles de millones de US$)", rangemode="tozero"))
@@ -2023,7 +2049,7 @@ def grafico_tipos_pais(latam, pais, a0, a1, medida):
 
 
 def grafico_anual_pais(latam, pais, a0, a1, medida):
-    """Número: barras por tipo + promedio móvil de 5 años. Costo: millones de US$ con los años más costosos."""
+    """Número: barras por tipo. Costo: miles de millones de US$ con los años más costosos."""
     costo = medida != "eventos"
     if costo:
         a1 = min(a1, ULTIMO_ANIO_COSTO)
@@ -2050,10 +2076,6 @@ def grafico_anual_pais(latam, pais, a0, a1, medida):
                                font=dict(size=10.5, color=COLOR_AZUL_PPT), bgcolor=hex_a_rgba(C["superficie"], 0.85))
         titulo_y = "Miles de millones de US$"
     else:
-        movil = total.rolling(5, min_periods=1).mean()
-        fig.add_scatter(x=movil.index, y=movil, name="Promedio de 5 años", mode="lines",
-                        line=dict(color=COLOR_AZUL_PPT, width=2.4, shape="spline", smoothing=0.6),
-                        hovertemplate="Promedio de 5 años: %{y:.1f}<extra></extra>")
         titulo_y = "N.º de desastres"
     fig.update_layout(barmode="stack", bargap=0.18, hovermode="x unified", margin=dict(l=4, r=4, t=36, b=4),
                       legend=dict(y=1.04, traceorder="normal"),
@@ -2280,7 +2302,7 @@ def icono(nombre):
 
 # ---- 5.2 Piezas comunes ------------------------------------------------------------------
 def panel(id_grafico, titulo, area, alto=380, numero_grafico=None, unidad=None, nota=None, fuente=None,
-          leyenda=None):
+          leyenda=None, nota_variable=False):
     """Recuadro con un gráfico:
         Gráfico N.º 1: Título del gráfico     <- en rojo, en una sola línea (id: <id_grafico>-titulo)
         (unidad)                              <- id: <id_grafico>-unidad
@@ -2295,8 +2317,9 @@ def panel(id_grafico, titulo, area, alto=380, numero_grafico=None, unidad=None, 
         hijos.append(leyenda)
     hijos.append(html.Div(className="grafico", style={"height": f"{alto}px"}, children=dcc.Graph(
         id=id_grafico, config=CONFIG_GRAFICO, responsive=True, style={"height": "100%"})))
-    if nota or fuente:
-        hijos.append(html.P(([html.Strong("Nota: "), nota, html.Br()] if nota else []) + [fuente or ""],
+    if nota or fuente or nota_variable:
+        variable = [html.Span(id=f"{id_grafico}-nota")] if nota_variable else []   # nota que cambia con los filtros
+        hijos.append(html.P(variable + ([html.Strong("Nota: "), nota, html.Br()] if nota else []) + [fuente or ""],
                             className="panel-pie"))
     return html.Section(className=f"panel area-{area}", children=hijos)
 
@@ -2494,6 +2517,16 @@ def tabla_criterio(clave):
     return html.Table(className="criterio", children=[cabecera, html.Tbody(filas)])
 
 
+def criterio_con_mapa(clave):
+    """Criterio a la izquierda y el mapa del índice a la derecha (si su imagen está junto a app.py)."""
+    archivo = IMAGENES_CLIMA.get(clave)
+    if not archivo or not os.path.exists(os.path.join(CARPETA, archivo)):
+        return tabla_criterio(clave)
+    mapa = html.Figure(className="criterio-mapa", children=[
+        html.Img(src=f"/imagenes/{archivo}", alt=f"Mapa de la zona que mide el {clave}")])
+    return html.Div(className="criterio-doble", children=[tabla_criterio(clave), mapa])
+
+
 def panel_definicion():
     """Cuadro con la definición del índice y su criterio (tabla). No lleva número: no es un gráfico."""
     return html.Section(className="panel area-definicion", children=[
@@ -2562,10 +2595,12 @@ def barra_lateral_id(base):
 
 
 def tarjeta_media_luna(id_base, sigla, nombre, nombre_icono="medidor", alto=140, destacada=False, color=None):
-    """Tarjeta con velocímetro en media luna (como las de los índices climáticos).
-    ids: <id_base>-titulo, <id_base>-graf, <id_base>-valor, <id_base>-nota"""
+    """Tarjeta con velocímetro en media luna (como las de los índices climáticos). Al hacer clic se elige
+    ese indicador y la tarjeta se enmarca, igual que en los índices climáticos.
+    ids: <id_base> (tarjeta), <id_base>-titulo, <id_base>-graf, <id_base>-valor, <id_base>-nota"""
     estilo = {"borderTop": f"4px solid {color}"} if color else {}
-    return html.Div(className="kpi-luna" + (" activa" if destacada else ""), style=estilo, children=[
+    return html.Div(id=id_base, n_clicks=0, className="kpi-luna" + (" activa" if destacada else ""),
+                    style=estilo, children=[
         html.Div(className="clima-tarjeta-cabeza", children=[
             html.Span(icono(nombre_icono), className="kpi-icono",
                       style={"background": hex_a_rgba(color, 0.14), "color": color} if color else {}),
@@ -2711,7 +2746,8 @@ def crear_layout_latam(latam):
     cabecera = cabecera_pagina(prefijo="latam")
 
     def grafico(n, alto):
-        return panel(f"latam-graf-{n}", "", f"latam-{n}", alto=alto, numero_grafico=n, fuente=FUENTE_LATAM)
+        return panel(f"latam-graf-{n}", "", f"latam-{n}", alto=alto, numero_grafico=n, fuente=FUENTE_LATAM,
+                     nota_variable=(n == 3))
 
     fila_1 = html.Div(className="fila fila-2", children=[grafico(1, 500), grafico(2, 500)])
     fila_2 = html.Div(className="fila fila-2", children=[grafico(3, 380), grafico(4, 380)])
@@ -2937,6 +2973,8 @@ margin-bottom:6px}
 .kpi-luna{background:var(--superficie);border:2px solid var(--borde);border-radius:var(--radio);padding:12px 12px 10px;
 min-width:0;display:flex;flex-direction:column;gap:4px;box-shadow:var(--sombra)}
 .kpi-luna.activa{border-color:var(--pacifico-medio);background:linear-gradient(180deg,#f3f8fd 0%,#fff 55%)}
+.kpi-luna{cursor:pointer;transition:box-shadow .15s ease,border-color .15s ease}
+.kpi-luna:hover{box-shadow:var(--sombra-alta)}
 .kpi-luna .clima-valor strong{font-size:24px}
 .kpi-grupo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .kpi-pilares{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto 1fr 1fr;gap:8px;
@@ -3064,6 +3102,14 @@ color:var(--tinta);background:var(--niebla);border:1px solid var(--borde);border
 color:var(--pacifico-medio)}
 .definicion-texto{margin-top:6px;font-size:14px;line-height:1.55;color:var(--tinta)}
 .criterio-contenedor{margin-top:6px;overflow-x:auto}
+.criterio-doble{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:center}
+.criterio-doble .criterio td:nth-child(2),.criterio-doble .criterio td.num{white-space:nowrap}
+.criterio-doble .criterio{font-size:12.5px}
+.criterio-doble .criterio th{font-size:11px}
+.criterio-doble .criterio td{padding:5px 6px}
+.criterio-mapa{margin:0;display:flex;align-items:center;justify-content:center}
+.criterio-mapa img{display:block;width:100%;height:auto;max-height:330px;object-fit:contain;border-radius:8px;
+border:1px solid var(--borde)}
 .criterio{width:100%;border-collapse:collapse;font-size:13.5px}
 .criterio th{text-align:left;font-size:12px;font-weight:700;color:var(--pacifico);text-transform:uppercase;
 letter-spacing:.04em;padding:7px 8px;border-bottom:2px solid var(--borde)}
@@ -3150,6 +3196,7 @@ font-weight:800;font-size:13px;flex:none}
 
 /* Celulares */
 @media (max-width:900px){
+.criterio-doble{grid-template-columns:minmax(0,1fr)}
 .app{grid-template-columns:minmax(0,1fr)}
 .lateral{position:static;height:auto;padding:18px 16px;gap:12px}
 .seleccion{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
@@ -3343,8 +3390,8 @@ def registrar_callbacks_clima(app, clima):
     def actualizar_graficos_clima(anio, mes, clave):
         idx = ubicar(anio, mes)
         cfg = INDICES_CLIMA[clave]
-        unidad = f"({cfg['unidad']})" if cfg.get("unidad") else ""
-        return (f"{clave}: {cfg['nombre']}", cfg.get("definicion", ""), tabla_criterio(clave),
+        unidad = UNIDAD_TEXTO_CLIMA.get(cfg.get("unidad", ""), f"({cfg['unidad']})")
+        return (f"{clave}: {cfg['nombre']}", cfg.get("definicion", ""), criterio_con_mapa(clave),
                 grafico_evolucion_clima(clima, clave, idx),
                 f"Evolución del {clave}, {primero_txt} – {ultimo_txt}", unidad,
                 grafico_estacional_clima(clima, clave, idx),
@@ -3353,8 +3400,27 @@ def registrar_callbacks_clima(app, clima):
                 f"Calendario del {clave}, {a0}-{a1}", f"{unidad} · color según el criterio".strip(" ·"))
 
 
+# ---- Tarjetas de media luna que se pueden elegir (ID e INFORM Risk) ----------------------
+def registrar_tarjetas_elegibles(app, prefijo, filtro, valores):
+    """Clic en la tarjeta <prefijo>-i -> el filtro toma valores[i]; la tarjeta elegida queda enmarcada."""
+    ids = [f"{prefijo}-{i}" for i in range(len(valores))]
+
+    @app.callback(Output(filtro, "value"), [Input(t, "n_clicks") for t in ids],
+                  prevent_initial_call=True)
+    def elegir_tarjeta(*clics):
+        origen = ctx.triggered_id
+        if origen not in ids or not any(clics):
+            return no_update
+        return valores[ids.index(origen)]
+
+    @app.callback([Output(t, "className") for t in ids], Input(filtro, "value"))
+    def enmarcar_tarjeta(valor):
+        return ["kpi-luna activa" if v == valor else "kpi-luna" for v in valores]
+
+
 # ---- 6.3 Índice de Desastres (ID) --------------------------------------------------------
 def registrar_callbacks_id(app, base, geojson):
+    registrar_tarjetas_elegibles(app, "id-kpi", "id-indicador", [COL_ID, COL_FREC, COL_SEV])
     anios = lista_anios(base)
     centros = centroides(geojson)
     serie_nacional = serie_id(base, NACIONAL)
@@ -3436,7 +3502,7 @@ def registrar_callbacks_id(app, base, geojson):
             chip = html.Span(f"Cuartil {cuartil}", className="clase-chip",
                              style={"background": COLORES_CUARTIL[cuartil],
                                     "color": "#fff" if cuartil >= 3 else C["tinta"]})
-            valor_html = [html.Strong(numero(valor, dec)), chip]
+            valor_html = [html.Strong(numero(valor, dec)), chip] if i < 3 else [html.Strong(numero(valor, dec))]
             nota = [delta_texto(valor, previo, str(anio - 1), dec)]
             if es_id:
                 if nacional:
@@ -3477,6 +3543,7 @@ def registrar_callbacks_id(app, base, geojson):
 
 # ---- 6.4 INFORM Risk ------------------------------------------------------------------------
 def registrar_callbacks_inform(app, inform):
+    registrar_tarjetas_elegibles(app, "inf-kpi", "inf-indicador", list(INDICADORES_INFORM))
     alc = tabla_alc(inform)
     por_nombre = {n: iso for iso, n in zip(alc.index, alc["NOMBRE"])}
     grupos = {g: [i for i in paises if i in inform.index] for g, paises in GRUPOS_INFORM.items()}
@@ -3498,9 +3565,10 @@ def registrar_callbacks_inform(app, inform):
         return iso if iso in alc.index else no_update
 
     # Barra lateral, INFORM Risk y sus 3 componentes (medias lunas con las clases del INFORM)
-    limites = [c[1] for c in CLASES_INFORM] + [10]
-    colores = [c[2] for c in CLASES_INFORM]
-    etiquetas = [c[0].upper().replace("MUY ", "MUY<br>") for c in CLASES_INFORM]
+    def escala(col):   # límites, colores y etiquetas de la media luna de cada indicador
+        clases = clases_inform(col)
+        return ([c[1] for c in clases] + [10], [c[2] for c in clases],
+                [c[0].upper().replace("MUY ", "MUY<br>") for c in clases])
 
     @app.callback([Output("inf-lateral-pais", "children")]
                   + [Output(f"inf-kpi-{i}-{parte}", prop) for i in range(4)
@@ -3512,14 +3580,14 @@ def registrar_callbacks_inform(app, inform):
         salida = [fila["NOMBRE"]]
         for i, col in enumerate(["INFORM RISK"] + list(DIMENSIONES_INFORM)):
             valor = fila[col]
-            clase, color = clase_inform(valor)
+            clase, color = clase_inform(valor, col)
             chip = html.Span(clase, className="clase-chip",
                              style={"background": color, "color": "#fff" if clase in ("Alto", "Muy alto") else C["tinta"]})
             titulo = f"INFORM Risk · {fila['NOMBRE']}" if i == 0 else DIMENSIONES_INFORM[col][0]
             nota = f"Puesto {puesto_alc(col, iso)} de {len(alc)} en la región · región: {numero(alc[col].mean(), 1)}"
             if i == 0:
                 nota = [nota, html.Br(), f"Puesto {int(fila['Rank'])} de {len(inform)} en el mundo"]
-            salida += [titulo, grafico_media_luna(valor, limites, colores, etiquetas, ("BAJO", "ALTO")),
+            salida += [titulo, grafico_media_luna(valor, *escala(col), ("BAJO", "ALTO")),
                        [html.Strong(numero(valor, 1)), chip], nota]
         return salida
 
@@ -3540,8 +3608,7 @@ def registrar_callbacks_inform(app, inform):
                 grafico_grupos_inform(inform, iso, col),
                 f"{titulo}: América Latina frente a economías avanzadas y emergentes, {ANIO_INFORM}", puntaje,
                 grafico_componentes_inform(inform, iso),
-                f"Componentes del INFORM Risk en {pais} frente al promedio de América Latina, {ANIO_INFORM}",
-                "(Puntaje de 0 a 10; el rombo es el promedio de los 21 países)")
+                f"Componentes del INFORM Risk en {pais}, {ANIO_INFORM}", "(Puntaje de 0 a 10)")
 
 
 # ---- 6.5 América Latina ----------------------------------------------------------------------
@@ -3651,7 +3718,8 @@ def registrar_callbacks_latam(app, latam):
 
     # Los 6 gráficos numerados (figura, título y unidad de cada uno)
     @app.callback([Output(f"latam-graf-{n}{parte}", prop) for n in range(1, 7)
-                   for parte, prop in (("", "figure"), ("-titulo", "children"), ("-unidad", "children"))],
+                   for parte, prop in (("", "figure"), ("-titulo", "children"), ("-unidad", "children"))]
+                  + [Output("latam-graf-3-nota", "children")],
                   Input("latam-pais", "value"), Input("latam-periodo", "value"), Input("latam-indicador", "value"))
     def actualizar_graficos_latam(pais, periodo, ind):
         p0, p1 = periodo_efectivo(periodo, ind)
@@ -3673,7 +3741,7 @@ def registrar_callbacks_latam(app, latam):
                     f"Número de desastres registrados en {donde} por tipo y subtipo, {texto}", "(N.º de desastres)",
                     grafico_anual_pais(latam, pais, p0, p1, "eventos"),
                     f"Número anual de desastres en {donde} por tipo, {texto}",
-                    "(N.º de desastres y promedio móvil de 5 años)")
+                    "(N.º de desastres)", "")
         return (grafico_ranking_latam(tabla, pais, ind), f"Costo económico de los desastres, {texto}", "(% del PBI)",
                 grafico_mapa_latam(tabla, pais, ind), f"Mapa del costo económico, {texto}", "(% del PBI)",
                 grafico_dispersion_latam(latam, p0, p1),
@@ -3686,7 +3754,7 @@ def registrar_callbacks_latam(app, latam):
                 f"Costo de los desastres en {donde} por tipo y subtipo, {texto}", "(% del PBI)",
                 grafico_anual_pais(latam, pais, p0, p1, "costo"),
                 f"Costo económico anual de los desastres en {donde}, {texto}",
-                "(Miles de millones de US$, ajustados por inflación)")
+                "(Miles de millones de US$, ajustados por inflación)", nota_correlacion_latam(latam, p0, p1))
 
 
 
@@ -3791,6 +3859,13 @@ app = Dash(__name__, title=f"{TITULO_PORTADA} | Perú", external_stylesheets=[UR
            meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
 app.index_string = PAGINA
 server = app.server
+
+
+@server.route("/imagenes/<path:archivo>")
+def imagen_clima(archivo):  # mapas de los índices climáticos (ICEN.jpg, ITCP.jpg, ...)
+    if archivo not in IMAGENES_CLIMA.values():
+        return "", 404
+    return send_from_directory(CARPETA, archivo)
 
 
 @server.route("/" + ARCHIVO_PORTADA)
