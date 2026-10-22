@@ -83,7 +83,7 @@ CLAVE_GEOJSON = "properties.NOMBDEP"
 TITULO_ = "Seguimiento de Indicadores e Índices de Desastres"
 SUBTITULO_ = ("Tableros para seguir las amenazas climáticas, los índices de desastres, "
                      "la situación de América Latina y el costo de los desastres.")
-ARCHIVO_PORTADA = "portado.jpg"      # imagen de fondo de la portada (junto a app.py)
+ARCHIVO_PORTADA = "portada.jpg"      # imagen de fondo de la portada (junto a app.py)
 RUTA_CLIMA = "/indices-mensuales"
 RUTA_ID = "/indice-desastres"
 RUTA_INFORM = "/inform-risk"
