@@ -84,6 +84,15 @@ TITULO_PORTADA = "Seguimiento de Indicadores e Índices de Desastres"
 SUBTITULO_PORTADA = ("Tableros para seguir las amenazas climáticas, los índices de desastres, "
                      "la situación de América Latina y el costo de los desastres.")
 ARCHIVO_PORTADA = "portada.jpg"      # imagen de fondo de la portada (junto a app.py)
+# Fecha en que TÚ actualizaste cada tablero (la escribes a mano cada vez que subes datos nuevos).
+#   "Datos hasta" no se escribe: sale solo del último dato de cada Excel.
+ACTUALIZADO = {
+    "clima": "20/10/2026",
+    "id": "20/10/2026",
+    "inform": "20/10/2026",
+    "latam": "20/10/2026",
+    "costos": "20/10/2026",
+}
 RUTA_CLIMA = "/indices-mensuales"
 RUTA_ID = "/indice-desastres"
 RUTA_INFORM = "/inform-risk"
@@ -109,7 +118,8 @@ SECCIONES = [
      "titulo": "Estimación de costos de desastres naturales",
      "descripcion": "Cuánto costarían los daños del Fenómeno El Niño 2026-2027 según la trayectoria "
                     "proyectada del ICEN.",
-     "etiquetas": ["FEN", "Costos", "ICEN"]},
+     "etiquetas": ["FEN", "Costos", "ICEN"],
+     "construccion": True},   # True = tarjeta naranja «En construcción» (igual se puede entrar)
 ]
 
 # ---- 1.3 Índices climáticos mensuales (archivo ICEM.xlsx) -----------------------
@@ -2363,6 +2373,18 @@ def cabecera_pagina(antetitulo="", titulo="", subtitulo="", prefijo=None):
         html.P(subtitulo, className="cabecera-sub", **ids("sub"))])
 
 
+def cuadro_fuente(fuente, datos_hasta, clave, nota=None):
+    """Cuadro de la barra lateral: Fuente · Datos hasta · Actualizado."""
+    filas = [("Fuente", fuente.replace("Fuente: ", "").strip().rstrip(".")), ("Datos hasta", datos_hasta),
+             ("Actualizado", ACTUALIZADO.get(clave, "—"))]
+    hijos = [html.Div(className="fuente-fila", children=[html.Span(t, className="fuente-etiqueta"),
+                                                         html.Span(v, className="fuente-valor")])
+             for t, v in filas]
+    if nota:
+        hijos.append(html.P(nota, className="fuente-nota"))
+    return html.Div(className="lateral-fuente cuadro-fuente", children=hijos)
+
+
 def boton_portada():
     return dcc.Link([icono("volver"), "Volver a la portada"], href="/", className="lateral-volver")
 
@@ -2379,14 +2401,14 @@ def selector_indices(activo):
 # ---- 5.3 Portada --------------------------------------------------------------------------
 def tarjeta_seccion(numero_tarjeta, seccion, dato):
     """Un botón grande de la portada (toda la tarjeta es clicable)."""
-    lista = seccion["lista"]
-    return dcc.Link(href=seccion["ruta"], className="tarjeta" + ("" if lista else " tarjeta-pendiente"),
-                    children=[
+    lista, obra = seccion["lista"], seccion.get("construccion", False)
+    clase = "tarjeta" + ("" if lista else " tarjeta-pendiente") + (" tarjeta-construccion" if obra else "")
+    return dcc.Link(href=seccion["ruta"], className=clase, children=[
         html.Div(className="tarjeta-cabeza", children=[
             html.Span(icono(seccion["icono"]), className="tarjeta-icono"),
             html.Span(f"{numero_tarjeta:02d}", className="tarjeta-numero")]),
-        html.Span("Disponible" if lista else "En preparación",
-                  className="estado " + ("estado-listo" if lista else "estado-pendiente")),
+        html.Span("En construcción" if obra else ("Disponible" if lista else "En preparación"),
+                  className="estado " + ("estado-obra" if obra else ("estado-listo" if lista else "estado-pendiente"))),
         html.H2(seccion["titulo"]),
         html.P(seccion["descripcion"], className="tarjeta-texto"),
         html.Ul([html.Li(e) for e in seccion["etiquetas"]], className="etiquetas"),
@@ -2399,23 +2421,23 @@ def tarjeta_seccion(numero_tarjeta, seccion, dato):
 def crear_portada(clima=None, base_id=None, inform=None, latam=None, costos=None):
     datos = {}
     if clima is not None:
-        datos[RUTA_CLIMA] = [html.Span(f"{clima['etiqueta'].iloc[0]} – {clima['etiqueta'].iloc[-1]} · "),
-                             html.Span(f"{len(INDICES_CLIMA)} índices mensuales")]
+        datos[RUTA_CLIMA] = [f"{clima['etiqueta'].iloc[0]} – {clima['etiqueta'].iloc[-1]}",
+                             f"{len(INDICES_CLIMA)} índices que monitorean la temperatura del mar"]
     if base_id is not None:
-        ultimo = lista_anios(base_id)[-1]
-        partes = [f"ID promedio {ultimo}: {numero(base_id.loc[base_id[COL_ANIO] == ultimo, COL_ID].mean(), 1)}"]
-        if inform is not None and PAIS_INICIAL_INFORM in inform.index:
-            partes.append(f"INFORM Risk {inform.loc[PAIS_INICIAL_INFORM, 'NOMBRE']}: "
-                          f"{numero(inform.loc[PAIS_INICIAL_INFORM, 'INFORM RISK'], 1)}")
-        datos[RUTA_ID] = [html.Span(p + (" · " if i < len(partes) - 1 else "")) for i, p in enumerate(partes)]
+        anios = lista_anios(base_id)
+        datos[RUTA_ID] = [f"ID {anios[0]}–{anios[-1]}", f"{base_id[COL_DPTO].nunique()} departamentos"]
+        if inform is not None:
+            n_paises = sum(iso in inform.index for iso in PAISES_INFORM)
+            datos[RUTA_ID] += [f"INFORM Risk {ANIO_INFORM}", f"{n_paises} países"]
     if latam is not None:
         e = latam["eventos"]
-        datos[RUTA_LATAM] = [html.Span(f"{e['anio'].min()}–{e['anio'].max()} · "),
-                             html.Span(f"{e['pais'].nunique()} países · "),
-                             html.Span(f"{numero(len(e), 0)} desastres")]
+        datos[RUTA_LATAM] = [f"{e['anio'].min()}–{e['anio'].max()}",
+                             f"{e['pais'].nunique()} países de América Latina y el Caribe"]
     if costos is not None:
-        datos[RUTA_COSTOS] = [html.Span("Simulador con el ICEN proyectado · "),
-                              html.Span(f"{mes_corto(costos['periodos'][0])} – {mes_corto(costos['periodos'][-1])}")]
+        info = costos["info"]
+        datos[RUTA_COSTOS] = [f"Datos {info['panel_desde'][:4]}–{info['panel_hasta'][:4]}",
+                              f"proyección {mes_corto(costos['periodos'][0])} – {mes_corto(costos['periodos'][-1])}"]
+    datos = {r: [html.Span(t + (" · " if i < len(p) - 1 else "")) for i, t in enumerate(p)] for r, p in datos.items()}
     tarjetas = [tarjeta_seccion(i, s, datos.get(s["ruta"], "En preparación"))
                 for i, s in enumerate(SECCIONES, start=1)]
     return html.Div(className="portada", children=[
@@ -2478,7 +2500,8 @@ def barra_lateral_clima(clima):
                        included=False),
             html.Button(f"Ir al último mes ({ultimo['etiqueta']})", id="clima-btn-ultimo",
                         n_clicks=0, className="boton-secundario")]),
-        html.P(FUENTE_CLIMA, className="lateral-fuente"),
+        cuadro_fuente(FUENTE_CLIMA, f"{MESES[int(clima['mes'].iloc[-1]) - 1].lower()} {int(clima['anio'].iloc[-1])}",
+                      "clima"),
         dcc.Interval(id="clima-intervalo", interval=700, disabled=True, n_intervals=0),
     ])
 
@@ -2589,7 +2612,7 @@ def barra_lateral_id(base):
                            options=[{"label": v["corto"], "value": k} for k, v in INDICADORES_ID.items()]),
             html.Button(f"Volver a Perú, {anios[-1]}", id="id-btn-reiniciar", n_clicks=0,
                         className="boton-secundario")]),
-        html.P(FUENTE_ID, className="lateral-fuente"),
+        cuadro_fuente(FUENTE_ID, str(anios[-1]), "id"),
         dcc.Interval(id="id-intervalo", interval=MS_POR_ANIO, disabled=True, n_intervals=0),
     ])
 
@@ -2669,7 +2692,7 @@ def barra_lateral_inform(inform):
                            options=[{"label": v, "value": k} for k, v in INDICADORES_INFORM.items()]),
             html.Button(f"Volver a {PAISES_INFORM[PAIS_INICIAL_INFORM]}", id="inf-btn-reiniciar", n_clicks=0,
                         className="boton-secundario")]),
-        html.P(FUENTE_INFORM, className="lateral-fuente"),
+        cuadro_fuente(FUENTE_INFORM, f"Edición {ANIO_INFORM}", "inform"),
     ])
 
 
@@ -2728,7 +2751,7 @@ def barra_lateral_latam(latam):
                            options=[{"label": v, "value": k} for k, v in INDICADORES_LATAM.items()]),
             html.Button(f"Volver a {PAIS_INICIAL}, {a0}-{a1}", id="latam-btn-reiniciar", n_clicks=0,
                         className="boton-secundario")]),
-        html.P(FUENTE_LATAM, className="lateral-fuente"),
+        cuadro_fuente(FUENTE_LATAM, f"{a1} (costos hasta {ULTIMO_ANIO_COSTO})", "latam"),
     ])
 
 
@@ -2778,8 +2801,8 @@ def barra_lateral_costos(costos):
             dcc.Checklist(id="costos-tope", value=["tope"], className="control-radio",
                           options=[{"label": "Limitar cada mes al máximo ICEN ya observado (piso)", "value": "tope"}]),
             html.Button("Volver al ICEN del Excel", id="costos-btn-reiniciar", n_clicks=0, className="boton-secundario")]),
-        html.P(f"Montos en millones de soles de {mes_texto(costos['info']['mes_base_soles'])}. {FUENTE_COSTOS}",
-               className="lateral-fuente"),
+        cuadro_fuente(FUENTE_COSTOS, f"SINPAD a {mes_texto(costos['info']['panel_hasta'])}", "costos",
+                      nota=f"Montos en millones de soles de {mes_texto(costos['info']['mes_base_soles'])}."),
     ])
 
 
@@ -2892,7 +2915,10 @@ def crear_layout_costos(costos):
     metodologia = html.Section(className="panel", children=[
         html.Header(className="panel-cabecera", children=[html.H3("¿Cómo se estimó?", className="panel-titulo")]),
         pasos_metodologia(info)])
-    contenido = html.Main(className="contenido", children=[cabecera, simulador, fila_1, fila_2, fila_3, metodologia])
+    aviso = html.P(className="aviso-obra", children=[
+        html.Strong("Tablero en construcción. "), "Los resultados son preliminares y pueden cambiar."])
+    contenido = html.Main(className="contenido", children=[aviso, cabecera, simulador, fila_1, fila_2, fila_3,
+                                                           metodologia])
     return html.Div(className="app", children=[barra_lateral_costos(costos), contenido])
 
 
@@ -2954,6 +2980,14 @@ display:flex;flex-direction:column;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,.18)
 .boton-secundario:hover{background:var(--niebla)}
 .lateral-fuente{margin-top:auto;font-size:12.5px;line-height:1.45;color:rgba(255,255,255,.75);
 border-top:1px solid rgba(255,255,255,.2);padding-top:12px}
+.cuadro-fuente{border:1px solid rgba(255,255,255,.22);border-radius:10px;padding:0;overflow:hidden;
+background:rgba(255,255,255,.06)}
+.fuente-fila{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px;padding:7px 10px;
+border-bottom:1px solid rgba(255,255,255,.14)}
+.fuente-fila:last-of-type{border-bottom:0}
+.fuente-etiqueta{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#9fcbf2}
+.fuente-valor{font-size:12.5px;color:#fff}
+.fuente-nota{padding:7px 10px;font-size:11.5px;color:rgba(255,255,255,.7);border-top:1px solid rgba(255,255,255,.14)}
 .rc-slider-mark-text{font-size:11px;color:var(--tinta-3)!important}
 .rc-slider-handle{border-color:var(--pacifico-medio)!important}
 
@@ -3065,6 +3099,16 @@ display:grid;place-items:center;flex:none}
 .estado{align-self:flex-start;display:inline-flex;align-items:center;font-size:12px;font-weight:650;padding:3px 10px;border-radius:999px}
 .estado-listo{background:#e2f3ea;color:#0f6b48}
 .estado-pendiente{background:#fff2dc;color:#8a5200}
+.estado-obra{background:#f59e0b;color:#fff}
+.aviso-obra{background:#fff3d6;border:1px solid #f5c26b;border-left:5px solid #f59e0b;border-radius:10px;
+padding:9px 14px;font-size:13.5px;color:#7a4300}
+.tarjeta-construccion{background:rgba(255,243,214,.96);border-color:#f5c26b}
+.tarjeta-construccion:hover{background:rgba(255,236,196,.98)}
+.tarjeta-construccion{position:relative}
+.tarjeta-construccion .estado{display:inline-flex;position:absolute;top:-11px;right:14px;box-shadow:0 2px 6px rgba(180,83,9,.3)}
+.tarjeta-construccion .tarjeta-icono{background:#fde7b8;color:#b45309}
+.tarjeta-construccion .tarjeta-boton,.tarjeta-construccion:hover .tarjeta-boton{background:#e07b00;border-color:#e07b00}
+.tarjeta-construccion .tarjeta-dato{border-top-color:rgba(180,83,9,.25)}
 .tarjeta-texto{font-size:14.5px;color:var(--tinta-2)}
 .etiquetas{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 .etiquetas li{font-size:12px;font-weight:600;color:var(--pacifico-medio);background:var(--niebla);
