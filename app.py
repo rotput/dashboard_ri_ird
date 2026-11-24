@@ -3168,7 +3168,7 @@ transition:border-color .2s ease,box-shadow .2s ease}
 .clima-tarjeta-cabeza{display:flex;align-items:center;gap:10px}
 .clima-sigla{display:block;font-size:15px;font-weight:750;color:var(--azul-ppt);line-height:1.2}
 .clima-nombre{display:block;font-size:12px;color:var(--tinta-2);line-height:1.3}
-.clima-valor{text-align:center;font-size:15px;color:var(--tinta)}
+.clima-valor{text-align:center;font-size:15px;color:var(--tinta);white-space:nowrap}   /* una sola línea: tarjetas alineadas */
 .clima-valor strong{font-size:24px;font-weight:750;font-stretch:110%;color:var(--pacifico);font-variant-numeric:tabular-nums}
 .clima-valor sub{font-size:11px;color:var(--tinta-2)}
 .clima-estado{align-self:center;display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:650;
@@ -3362,7 +3362,6 @@ def registrar_callbacks_clima(app, clima):
     por_fecha = {f.strftime("%Y-%m"): i for i, f in enumerate(clima["fecha"])}
     primero_txt, ultimo_txt = clima["etiqueta"].iloc[0], clima["etiqueta"].iloc[-1]
     a0, a1 = int(clima["anio"].min()), int(clima["anio"].max())
-    ultimo_dato = {k: int(clima[k].last_valid_index()) if clima[k].notna().any() else None for k in claves}
 
     def ubicar(anio, mes):
         """Fila del mes elegido; si ese mes aún no tiene dato, el último mes con dato de ese año."""
@@ -3440,16 +3439,15 @@ def registrar_callbacks_clima(app, clima):
             usada = clima.loc[j] if j is not None else fila
             previa = clima.loc[j - 1] if j is not None and j > 0 else None
             valor = usada[k]
-            es_ultimo = j is not None and j == ultimo_dato[k]
             cat = clasificar_clima(valor, cfg)
             if cat is None:
                 valor_html = html.Span(f"Sin dato en {fila['etiqueta']}")
                 estado = html.Span("Sin dato")
             else:
                 seg = segmentos_clima(cfg)[cat]
-                texto = "Último dato" if es_ultimo else "Valor"
+                texto = "Último valor" if j != idx else "Valor"   # «Último valor» solo si el mes elegido no tiene dato
                 if usada[k + "_prelim"]:
-                    texto += " preliminar" if texto == "Valor" else " (preliminar)"
+                    texto += " preliminar"
                 valor_html = [texto, html.Sub(f" {usada['etiqueta']}"), " = ", html.Strong(valor_con_unidad(valor, cfg))]
                 estado = [html.Span(className="criterio-color", style={"background": seg["color"]}), seg["texto"]]
             anterior = previa[k] if previa is not None else np.nan
