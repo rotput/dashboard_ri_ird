@@ -84,14 +84,16 @@ TITULO_PORTADA = "Seguimiento de Indicadores e Índices de Desastres"
 SUBTITULO_PORTADA = ("Tableros para seguir las amenazas climáticas, los índices de desastres, "
                      "la situación de América Latina y el costo de los desastres.")
 ARCHIVO_PORTADA = "portada.jpg"      # imagen de fondo de la portada (junto a app.py)
-# Fecha en que TÚ actualizaste cada tablero (la escribes a mano cada vez que subes datos nuevos).
-#   "Datos hasta" no se escribe: sale solo del último dato de cada Excel.
+# Fecha de actualización de cada tablero. None = se pone SOLA: es la fecha en que se guardó por última vez
+#   su Excel (la que Excel anota dentro del archivo al guardarlo; no cambia al subirlo a GitHub).
+#   Si quieres otra fecha, escríbela a mano, por ejemplo "24/11/2026".
+#   "Datos hasta" tampoco se escribe: sale solo del último dato de cada Excel.
 ACTUALIZADO = {
-    "clima": "20/10/2026",
-    "id": "20/10/2026",
-    "inform": "20/10/2026",
-    "latam": "20/10/2026",
-    "costos": "20/10/2026",
+    "clima": None,
+    "id": None,
+    "inform": None,
+    "latam": None,
+    "costos": None,
 }
 RUTA_CLIMA = "/indices-mensuales"
 RUTA_ID = "/indice-desastres"
@@ -119,7 +121,8 @@ SECCIONES = [
      "descripcion": "Cuánto costarían los daños del Fenómeno El Niño 2026-2027 según la trayectoria "
                     "proyectada del ICEN.",
      "etiquetas": ["FEN", "Costos", "ICEN"],
-     "construccion": True},   # True = tarjeta naranja «En construcción» (igual se puede entrar)
+     "construccion": True,    # True = tarjeta naranja «En construcción» (igual se puede entrar)
+     "oculta": True},         # True = no sale en la portada (la página sigue funcionando en su dirección)
 ]
 
 # ---- 1.3 Índices climáticos mensuales (archivo ICEM.xlsx) -----------------------
@@ -2376,13 +2379,41 @@ def cabecera_pagina(antetitulo="", titulo="", subtitulo="", prefijo=None):
 def cuadro_fuente(fuente, datos_hasta, clave, nota=None):
     """Cuadro de la barra lateral: Fuente · Datos hasta · Actualizado."""
     filas = [("Fuente", fuente.replace("Fuente: ", "").strip().rstrip(".")), ("Datos hasta", datos_hasta),
-             ("Actualizado", ACTUALIZADO.get(clave, "—"))]
+             ("Actualizado", fecha_actualizacion(clave))]
     hijos = [html.Div(className="fuente-fila", children=[html.Span(t, className="fuente-etiqueta"),
                                                          html.Span(v, className="fuente-valor")])
              for t, v in filas]
     if nota:
         hijos.append(html.P(nota, className="fuente-nota"))
     return html.Div(className="lateral-fuente cuadro-fuente", children=hijos)
+
+
+def fecha_excel(ruta):
+    """Fecha (dd/mm/aaaa, hora de Lima) en que se guardó el Excel por última vez, o None si no se puede leer."""
+    try:
+        import openpyxl
+        libro = openpyxl.load_workbook(ruta, read_only=True)
+        guardado = libro.properties.modified
+        libro.close()
+        if guardado is None:
+            return None
+        return (pd.Timestamp(guardado) - pd.Timedelta(hours=5)).strftime("%d/%m/%Y")   # UTC -> Lima
+    except Exception:
+        return None
+
+
+FECHAS_ACTUALIZADO = {}   # se calculan una sola vez
+
+
+def fecha_actualizacion(clave):
+    """Fecha escrita a mano en ACTUALIZADO o, si es None, la fecha en que se guardó el Excel del tablero."""
+    if ACTUALIZADO.get(clave):
+        return ACTUALIZADO[clave]
+    if clave not in FECHAS_ACTUALIZADO:
+        archivos = {"clima": ARCHIVO_CLIMA, "id": ARCHIVO_ID, "inform": ARCHIVO_INFORM,
+                    "latam": ARCHIVO_LATAM, "costos": ARCHIVO_FEN}
+        FECHAS_ACTUALIZADO[clave] = fecha_excel(archivos[clave]) if clave in archivos else None
+    return FECHAS_ACTUALIZADO[clave] or "—"
 
 
 def boton_portada():
@@ -2438,13 +2469,14 @@ def crear_portada(clima=None, base_id=None, inform=None, latam=None, costos=None
         datos[RUTA_COSTOS] = [f"Datos {info['panel_desde'][:4]}–{info['panel_hasta'][:4]}",
                               f"proyección {mes_corto(costos['periodos'][0])} – {mes_corto(costos['periodos'][-1])}"]
     datos = {r: [html.Span(t + (" · " if i < len(p) - 1 else "")) for i, t in enumerate(p)] for r, p in datos.items()}
+    visibles = [s for s in SECCIONES if not s.get("oculta")]
     tarjetas = [tarjeta_seccion(i, s, datos.get(s["ruta"], "En preparación"))
-                for i, s in enumerate(SECCIONES, start=1)]
+                for i, s in enumerate(visibles, start=1)]
     return html.Div(className="portada", children=[
         html.Header(className="portada-hero", children=html.Div(className="portada-interior", children=[
             html.H1(TITULO_PORTADA),
             html.P(SUBTITULO_PORTADA, className="portada-sub")])),
-        html.Nav(tarjetas, className="portada-tarjetas", **{"aria-label": "Tableros"}),
+        html.Nav(tarjetas, className="portada-tarjetas", style={"--n": len(tarjetas)}, **{"aria-label": "Tableros"}),
     ])
 
 
@@ -2945,6 +2977,7 @@ h1,h2,h3,h4,p{margin:0}
 .lateral{position:sticky;top:0;height:100vh;overflow-y:auto;color:#fff;
 background:linear-gradient(180deg,#0b3a66 0%,#0a2f54 100%);
 padding:24px 22px 22px;display:flex;flex-direction:column;gap:16px}
+.lateral>*{flex-shrink:0}   /* ninguna pieza se aplasta: si no entra, la barra se desplaza */
 .lateral-volver{display:flex;align-items:center;justify-content:center;gap:9px;color:#fff;font-size:15px;
 font-weight:650;text-decoration:none;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.14);
 border:1px solid rgba(255,255,255,.55);transition:background .2s ease}
@@ -3077,7 +3110,7 @@ linear-gradient(100deg,rgba(6,30,54,.88) 0%,rgba(6,30,54,.55) 42%,rgba(6,30,54,0
 .portada h1{margin-top:14px;font-size:54px;line-height:1.04;font-weight:800;font-stretch:118%;letter-spacing:-.025em;max-width:20ch}
 .portada-sub{margin-top:18px;font-size:18px;line-height:1.5;color:rgba(255,255,255,.82);max-width:58ch}
 .portada-tarjetas{position:relative;z-index:2;margin-top:-150px;padding:0 48px;display:grid;gap:16px;
-grid-template-columns:repeat(4,minmax(0,1fr))}
+grid-template-columns:repeat(var(--n,4),minmax(0,1fr))}
 /* Tarjetas planas: ícono y título arriba, texto, y abajo el dato y el botón */
 .tarjeta{display:grid;grid-template-columns:44px minmax(0,1fr);grid-template-rows:auto 1fr auto auto;column-gap:12px;row-gap:6px;
 align-items:center;background:rgba(248,251,255,.93);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
@@ -3329,6 +3362,7 @@ def registrar_callbacks_clima(app, clima):
     por_fecha = {f.strftime("%Y-%m"): i for i, f in enumerate(clima["fecha"])}
     primero_txt, ultimo_txt = clima["etiqueta"].iloc[0], clima["etiqueta"].iloc[-1]
     a0, a1 = int(clima["anio"].min()), int(clima["anio"].max())
+    ultimo_dato = {k: int(clima[k].last_valid_index()) if clima[k].notna().any() else None for k in claves}
 
     def ubicar(anio, mes):
         """Fila del mes elegido; si ese mes aún no tiene dato, el último mes con dato de ese año."""
@@ -3399,15 +3433,24 @@ def registrar_callbacks_clima(app, clima):
         salida = [str(fila["anio"]), nombre_mes, f"Índices climáticos, {nombre_mes.lower()} de {fila['anio']}"]
         for k in claves:
             cfg = INDICES_CLIMA[k]
-            valor, dec, unidad = fila[k], cfg["decimales"], cfg.get("unidad", "")
+            dec, unidad = cfg["decimales"], cfg.get("unidad", "")
+            # Mes que se muestra: el elegido o, si aún no tiene dato, el último mes con dato de este índice
+            con_dato = clima.index[(clima.index <= idx) & clima[k].notna()]
+            j = idx if not es_vacio(fila[k]) else (int(con_dato[-1]) if len(con_dato) else None)
+            usada = clima.loc[j] if j is not None else fila
+            previa = clima.loc[j - 1] if j is not None and j > 0 else None
+            valor = usada[k]
+            es_ultimo = j is not None and j == ultimo_dato[k]
             cat = clasificar_clima(valor, cfg)
             if cat is None:
                 valor_html = html.Span(f"Sin dato en {fila['etiqueta']}")
                 estado = html.Span("Sin dato")
             else:
                 seg = segmentos_clima(cfg)[cat]
-                valor_html = ["Valor preliminar" if fila[k + "_prelim"] else "Valor",
-                              html.Sub(f" {fila['etiqueta']}"), " = ", html.Strong(valor_con_unidad(valor, cfg))]
+                texto = "Último dato" if es_ultimo else "Valor"
+                if usada[k + "_prelim"]:
+                    texto += " preliminar" if texto == "Valor" else " (preliminar)"
+                valor_html = [texto, html.Sub(f" {usada['etiqueta']}"), " = ", html.Strong(valor_con_unidad(valor, cfg))]
                 estado = [html.Span(className="criterio-color", style={"background": seg["color"]}), seg["texto"]]
             anterior = previa[k] if previa is not None else np.nan
             if es_vacio(valor) or es_vacio(anterior):
@@ -3421,6 +3464,8 @@ def registrar_callbacks_clima(app, clima):
                     delta = html.Span([html.Span("▲" if sube else "▼", className="delta-icono"),
                                        f" {con_signo(cambio, dec)} {unidad} vs {previa['etiqueta']}"],
                                       className="delta " + ("delta-sube" if sube else "delta-baja"))
+            if j is not None and j != idx:   # aviso: el mes elegido aún no tiene dato
+                delta = [delta, html.Br(), html.Span(f"Aún no hay dato de {fila['etiqueta']}", className="delta delta-neutro")]
             salida += [grafico_velocimetro_clima(cfg, valor), valor_html, estado, delta,
                        "clima-tarjeta activa" if k == clave_sel else "clima-tarjeta"]
         return salida
