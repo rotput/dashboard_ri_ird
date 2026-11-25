@@ -112,18 +112,18 @@ RUTA_PRONOSTICO = "/pronostico-climatico"
 SECCIONES = [
     {"ruta": RUTA_CLIMA, "icono": "ola", "lista": True,
      "titulo": "Índices climáticos mensuales",
-     "descripcion": "Seguimiento mes a mes de los índices que miden si el mar está en condición "
+     "descripcion": "Seguimiento mensual de los índices que miden si el mar está en condición "
                     "cálida, neutra o fría.",
      "etiquetas": ["ICEN", "ITCP", "LABCOS", "ENOS"]},
     {"ruta": RUTA_PRONOSTICO, "icono": "nube", "lista": True,
      "titulo": "Pronóstico climático",
-     "descripcion": "Dónde lloverá y dónde hará calor o frío en los próximos días. Se actualiza solo con el "
-                    "pronóstico del SENAMHI.",
+     "descripcion": "Seguimiento de las condiciones meteorológicas previstas a nivel nacional, con énfasis en "
+                    "precipitaciones y temperaturas, a partir de información oficial del SENAMHI.",
      "etiquetas": ["SENAMHI", "Lluvias", "Temperatura"]},
     {"ruta": RUTA_ID, "icono": "medidor", "lista": True,
      "titulo": "Índices de desastres",
-     "descripcion": "Índice de Desastres (ID) de los 25 departamentos del Perú e índice INFORM Risk "
-                    "de América Latina y el mundo.",
+     "descripcion": "Monitoreo de indicadores e índices de desastres que permiten analizar las condiciones de "
+                    "riesgo a nivel nacional e internacional.",
      "etiquetas": ["ID", "INFORM Risk"]},
     {"ruta": RUTA_LATAM, "icono": "globo", "lista": True,
      "titulo": "Estadísticas de América Latina",
@@ -404,6 +404,12 @@ TARJETAS_PRONOSTICO = {
     "bajas": (f"Distritos con temperaturas bajas ({TEMPERATURA_BAJA} °C o menos)", "copo", "#2171B5", "temperatura"),
     "seco": ("Distritos sin lluvia", "sol", "#D98C00", "seco"),
 }
+# Si la página del SENAMHI no trae el texto del pronóstico, la lluvia se lee del ícono (0 sin lluvia, 1 ligera,
+#   2 moderada, 3 fuerte o tormenta). Se armó comparando los íconos con los textos de días anteriores.
+LLUVIA_POR_ICONO = {"icon001.png": 0, "icon002.png": 0, "icon003.png": 0, "icon004.png": 0, "icon005.png": 2,
+                    "icon006.png": 1, "icon007.png": 1, "icon008.png": 2, "icon009.png": 2, "icon010.png": 3,
+                    "icon011.png": 3, "icon013.png": 1, "icon021.png": 0, "icon035.png": 2, "icon036.png": 1}
+ICONOS_DESPEJADO = {"icon001.png", "icon002.png"}
 UMBRALES_CALOR = [30, 33]           # temperatura máxima: calor (30 a 32 °C) y calor intenso (33 °C a más)
 COLOR_SIN_LOCALIDAD = "#FFFFFF"     # provincias sin datos (en blanco)
 # Localidades del SENAMHI cuyo nombre no es el de su distrito: (departamento, localidad) -> (departamento,
@@ -1501,6 +1507,21 @@ def _de_la_fila(nodo, fila):
     return False
 
 
+def _descripcion_web(bloque):
+    """Texto del pronóstico de un día: su recuadro, el título del ícono o, si no, el texto más largo del bloque."""
+    texto = _texto_web(_primero_web(bloque, "div.col-sm-5", "p"))
+    if texto:
+        return texto
+    imagen = bloque.select_one("img")
+    for atributo in ("title", "alt", "data-original-title"):
+        valor = (imagen.get(atributo) or "").strip() if imagen else ""
+        if len(valor) > 15:
+            return valor
+    largos = [t for t in bloque.stripped_strings if len(t) > 15 and re.search(r"[A-Za-z]{4}", t)
+              and not re.search(r"\d{1,2}\s+de\s+[a-z]+", t.lower())]
+    return max(largos, key=len) if largos else ""
+
+
 def descargar_pronostico_web(intentos=3, espera=40):
     """Lee la tabla nacional del pronóstico en la página del SENAMHI. Devuelve una fila por localidad y día."""
     import requests
@@ -1535,7 +1556,10 @@ def descargar_pronostico_web(intentos=3, espera=40):
         textos = [t for t in celdas[0].stripped_strings if t] if celdas else []
         if not textos:
             continue
-        departamento, localidad = (textos[0], textos[1]) if len(textos) >= 2 else ("", textos[0])
+        if " - " in textos[0]:   # formato nuevo: «BAGUA GRANDE - AMAZONAS»
+            localidad, departamento = [x.strip() for x in textos[0].rsplit(" - ", 1)]
+        else:
+            departamento, localidad = (textos[0], textos[1]) if len(textos) >= 2 else ("", textos[0])
         for bloque in [b for b in tr.select("div.row.m-3") if _de_la_fila(b, tr)]:
             tmax = _primero_web(bloque, "h1.text-danger", "span.text-danger", ".text-danger")
             tmin = _primero_web(bloque, "h1.text-primary", "span.text-primary", ".text-primary")
@@ -1548,7 +1572,7 @@ def descargar_pronostico_web(intentos=3, espera=40):
                 "fecha_texto": _texto_web(_primero_web(bloque, "div.col-sm-3", "strong")),
                 "temp_max_c": _numero_web(tmax.get_text(strip=True)) if tmax else None,
                 "temp_min_c": _numero_web(tmin.get_text(strip=True)) if tmin else None,
-                "descripcion": _texto_web(_primero_web(bloque, "div.col-sm-5", "p")),
+                "descripcion": _descripcion_web(bloque),
                 "icono": ((imagen.get("src") or imagen.get("data-src") or "") if imagen else "").split("/")[-1],
                 "url_detalle": url})
     tabla = pd.DataFrame(registros)
@@ -1567,6 +1591,11 @@ def preparar_pronostico(crudo, origen, actualizado):
     df.columns = df.columns.astype(str).str.strip()
     # Las descargas viejas repetían filas: la primera de cada localidad y día es la que vale
     df = df.drop_duplicates(subset=["cod_dp", "cod_localidad", "fecha_texto"], keep="first").copy()
+    # Formato nuevo del SENAMHI: «BAGUA GRANDE - AMAZONAS» en departamento y la fecha en localidad
+    partes = df["departamento"].astype(str).str.rsplit(" - ", n=1)
+    arreglar = (partes.str.len() == 2) & df["localidad"].astype(str).str.contains(r"\d{1,2} DE ", case=False)
+    df.loc[arreglar, "localidad"] = partes[arreglar].str[0].str.strip()
+    df.loc[arreglar, "departamento"] = partes[arreglar].str[1].str.strip()
     df["dpto"] = df["departamento"].map(normalizar)
     df["clave_loc"] = df["localidad"].map(normalizar)
     df["localidad"] = df["localidad"].astype(str).str.strip().str.title()
@@ -1575,9 +1604,13 @@ def preparar_pronostico(crudo, origen, actualizado):
     df["descripcion"] = df["descripcion"].fillna("").astype(str).str.strip().str.replace(" ,", ",")
     df["fecha"] = [fecha_pronostico(t) for t in df["fecha_texto"]]
     df = df.dropna(subset=["fecha", "tmax", "tmin"]).reset_index(drop=True)
-    df["c_lluvia"] = df["descripcion"].map(nivel_lluvia)
+    icono = df["icono"].astype(str).str.strip() if "icono" in df else pd.Series("", index=df.index)
+    sin_texto = df["descripcion"] == ""
+    df["c_lluvia"] = np.where(sin_texto, icono.map(LLUVIA_POR_ICONO).fillna(0),
+                              df["descripcion"].map(nivel_lluvia)).astype(int)
     df["c_temperatura"] = [clase_temperatura(a, b) for a, b in zip(df["tmax"], df["tmin"])]
-    despejado = df["descripcion"].str.lower().str.contains("despejado|brillo solar")
+    despejado = (df["descripcion"].str.lower().str.contains("despejado|brillo solar")
+                 | (sin_texto & icono.isin(ICONOS_DESPEJADO)))
     df["c_seco"] = np.where(df["c_lluvia"] > 0, 2, np.where(despejado, 0, 1))
     try:
         lugares = ubicar_localidades(set(zip(df["dpto"], df["clave_loc"])))
@@ -3087,7 +3120,7 @@ def tarjeta_seccion(numero_tarjeta, seccion, dato):
         html.P(seccion["descripcion"], className="tarjeta-texto"),
         html.Ul([html.Li(e) for e in seccion["etiquetas"]], className="etiquetas"),
         html.P(dato, className="tarjeta-dato"),
-        html.Span([("Entrar al tablero" if lista else "Ver sección"), icono("flecha")],
+        html.Span([("Ingresar al tablero" if lista else "Ver sección"), icono("flecha")],
                   className="tarjeta-boton"),
     ])
 
@@ -3633,8 +3666,6 @@ def cabecera_pronostico(pron):
     al_dia = bool(pron["fechas"]) and pron["fechas"][0].date() >= ahora_lima().date()
     detalle = [html.Strong("Pronóstico al día" if al_dia else "Pronóstico desactualizado"),
                html.Span(f"Consulta al SENAMHI: {pron['actualizado']}")]
-    if not al_dia and _PRONOSTICO["error"]:
-        detalle.append(html.Small(f"Motivo: {_PRONOSTICO['error'][:160]}", className="pron-hero-motivo"))
     estado = html.Div(className="pron-hero-estado" + ("" if al_dia else " pron-hero-estado-archivo"),
                       children=[html.Span(className="pron-punto"), html.Div(detalle)])
     return html.Header(className="pron-hero", children=[
@@ -4087,7 +4118,6 @@ text-transform:uppercase;color:#9fcbf2}
 border-radius:14px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.28);font-size:12.5px;line-height:1.4}
 .pron-hero-estado strong{display:block;font-size:13.5px}
 .pron-hero-estado span{color:rgba(255,255,255,.85)}
-.pron-hero-motivo{display:block;margin-top:4px;font-size:11px;line-height:1.35;color:rgba(255,255,255,.7);word-break:break-word}
 .pron-punto{flex:none;width:11px;height:11px;border-radius:50%;background:#3ddc84;animation:latido 2.2s ease-in-out infinite}
 .pron-hero-estado-archivo .pron-punto{background:#f5b041;animation:none;box-shadow:0 0 0 4px rgba(245,176,65,.25)}
 @keyframes latido{0%,100%{box-shadow:0 0 0 3px rgba(61,220,132,.30)}50%{box-shadow:0 0 0 8px rgba(61,220,132,.05)}}
