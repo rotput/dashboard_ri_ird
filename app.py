@@ -8,7 +8,8 @@
 #    /inform-risk          Índice INFORM Risk                <- inform.xlsx
 #    /latam                Estadísticas de América Latina    <- EMDAT_LATAM.xlsx
 #    /estimacion-costos    Estimación de costos de desastres    <- BASE_FEN_CONSOLIDADA.xlsx
-#    /pronostico-climatico Pronóstico climático (SENAMHI)    <- senamhi_pronostico_nacional_2.xlsx
+#    /pronostico-climatico Pronóstico climático (SENAMHI)    <- se lee solo de la web del SENAMHI
+#                                                             (respaldo: senamhi_pronostico_nacional_2.xlsx)
 #  Archivos junto a app.py: ICEM.xlsx, IRD_RESULTADO.xlsx, inform.xlsx, EMDAT_LATAM.xlsx,
 #                           BASE_FEN_CONSOLIDADA.xlsx, senamhi_pronostico_nacional_2.xlsx, portada.jpg
 #                           y (opcional) fen_cache.pkl
@@ -37,6 +38,8 @@ import os
 import pickle
 import re
 import sys
+import threading
+import time
 import unicodedata
 import urllib.parse
 import urllib.request
@@ -114,8 +117,8 @@ SECCIONES = [
      "etiquetas": ["ICEN", "ITCP", "LABCOS", "ENOS"]},
     {"ruta": RUTA_PRONOSTICO, "icono": "nube", "lista": True,
      "titulo": "Pronóstico climático",
-     "descripcion": "Dónde lloverá y dónde hará calor o frío en los próximos días, según el pronóstico del "
-                    "SENAMHI por localidad.",
+     "descripcion": "Dónde lloverá y dónde hará calor o frío en los próximos días. Se actualiza solo con el "
+                    "pronóstico del SENAMHI.",
      "etiquetas": ["SENAMHI", "Lluvias", "Temperatura"]},
     {"ruta": RUTA_ID, "icono": "medidor", "lista": True,
      "titulo": "Índices de desastres",
@@ -346,8 +349,13 @@ COLOR_TEMPORADA_NINO = "#F2AA84"         # temporadas pasadas con ICEN máximo �
 TOP_DEPARTAMENTOS = 12
 
 
-# ---- 1.8 Pronóstico climático (SENAMHI, archivo senamhi_pronostico_nacional_2.xlsx) -------------------
-# Se usa el primer archivo que exista de esta lista (junto a app.py)
+# ---- 1.8 Pronóstico climático (SENAMHI) --------------------------------------------------------------------
+# El pronóstico se lee SOLO de la página del SENAMHI (cambia cada día): al encender el tablero y después cada
+#   ACTUALIZAR_PRONOSTICO_HORAS horas. Si la página no responde, se usa el último Excel guardado junto a app.py
+#   (ARCHIVOS_PRONOSTICO) y se vuelve a intentar a los REINTENTAR_PRONOSTICO_MINUTOS minutos.
+URL_SENAMHI = "https://www.senamhi.gob.pe/?p=pronostico-meteorologico"
+ACTUALIZAR_PRONOSTICO_HORAS = 3
+REINTENTAR_PRONOSTICO_MINUTOS = 30
 ARCHIVOS_PRONOSTICO = [os.path.join(CARPETA, n) for n in ("senamhi_pronostico_nacional_2.xlsx",
                                                           "senamhi_pronostico_nacional.xlsx")]
 HOJA_PRONOSTICO = "Pronostico"
@@ -359,28 +367,42 @@ URL_GEOJSON_DIST = ("https://raw.githubusercontent.com/juaneladio/peru-geojson/"
                     "master/peru_distrital_simple.geojson")
 RUTA_GEOJSON_PROV = os.path.join(CARPETA, "peru_provincial.geojson")
 RUTA_GEOJSON_DIST = os.path.join(CARPETA, "peru_distrital.geojson")
-# Los 4 botones del tablero: qué pinta el mapa en cada uno. Las clases van de la primera a la última;
-#   "extremo" dice qué localidad manda en la provincia: "max" = la clase más alta, "min" = la más baja.
+# Las tarjetas de arriba cuentan DISTRITOS: con temperaturas altas (máxima de 30 °C a más) y bajas (mínima de 5 °C
+#   o menos). HELADA: mínima de 0 °C o menos.
+TEMPERATURA_ALTA, TEMPERATURA_BAJA, HELADA = 30, 5, 0
+# Los 3 botones del tablero. Para cada uno:
+#   clases: (nombre, color, nombre corto) de la primera a la última
+#   extremo: qué localidad manda en la provincia del mapa ("max" = la clase más alta; "intenso" = la más
+#            alejada de «Templado», sea calor o frío)
+#   neutra: clase que NO se pinta (queda en blanco)
 MODOS_PRONOSTICO = {
     "lluvia": {"boton": "Lluvias", "icono": "gota", "color": "#2F6FB5", "extremo": "max", "neutra": 0,
-               "tarjeta": "Localidades con lluvia",
-               "clases": [("Sin lluvia (sin color)", "#FFFFFF"), ("Lluvia ligera o llovizna", "#9ECAE1"),
-                          ("Lluvia moderada", "#3182BD"), ("Lluvia fuerte o tormenta", "#3F007D")]},
-    "calor": {"boton": "Calor", "icono": "sol", "color": "#E6550D", "extremo": "max",
-              "tarjeta": "Temperatura más alta",
-              "clases": [("Menos de 20 °C", "#FFF1DE"), ("20 a 24 °C", "#FDD0A2"), ("25 a 29 °C", "#FD8D3C"),
-                         ("30 a 32 °C", "#E6550D"), ("33 °C a más", "#A63603")]},
-    "frio": {"boton": "Frío", "icono": "copo", "color": "#2171B5", "extremo": "min",
-             "tarjeta": "Temperatura más baja",
-             "clases": [("Helada: 0 °C o menos", "#08306B"), ("1 a 5 °C", "#2171B5"), ("6 a 10 °C", "#6BAED6"),
-                        ("11 a 15 °C", "#C6DBEF"), ("16 °C a más", "#F4F8FC")]},
-    "seco": {"boton": "Sin lluvias", "icono": "termometro", "color": "#D98C00", "extremo": "max", "neutra": 2,
-             "tarjeta": "Localidades sin lluvia",
-             "clases": [("Despejado y sin lluvia", "#F0A202"), ("Nublado y sin lluvia", "#F7D98B"),
-                        ("Con lluvia (sin color)", "#FFFFFF")]},
+               "tema": "lluvias", "columna": "Lluvia",
+               "clases": [("Sin lluvia (sin color)", "#FFFFFF", "Sin lluvia"),
+                          ("Lluvia ligera o llovizna", "#9ECAE1", "Ligera"),
+                          ("Lluvia moderada", "#3182BD", "Moderada"),
+                          ("Lluvia fuerte o tormenta", "#3F007D", "Fuerte o tormenta")]},
+    "temperatura": {"boton": "Temperaturas", "icono": "termometro", "color": "#E6550D", "extremo": "intenso",
+                    "neutra": 2, "tema": "temperaturas", "columna": "Temperatura",
+                    "clases": [("Helada: 0 °C o menos", "#08306B", "Helada"),
+                               ("Frío: mínima de 1 a 5 °C", "#6BAED6", "Frío"),
+                               ("Templado (sin color)", "#FFFFFF", "Templado"),
+                               ("Calor: máxima de 30 a 32 °C", "#FD8D3C", "Calor"),
+                               ("Calor intenso: 33 °C a más", "#A63603", "Calor intenso")]},
+    "seco": {"boton": "Sin lluvias", "icono": "sol", "color": "#D98C00", "extremo": "max", "neutra": 2,
+             "tema": "zonas sin lluvia", "columna": "Cielo",
+             "clases": [("Despejado y sin lluvia", "#F0A202", "Despejado"),
+                        ("Nublado y sin lluvia", "#F7D98B", "Nublado"),
+                        ("Con lluvia (sin color)", "#FFFFFF", "Con lluvia")]},
 }
-UMBRALES_CALOR = [20, 25, 30, 33]   # temperatura máxima: desde estos valores empieza cada clase
-UMBRALES_FRIO = [0, 5, 10, 15]      # temperatura mínima: hasta estos valores llega cada clase
+# Las 4 tarjetas de arriba (cuentan distritos): título, ícono, color y el botón que activan al hacer clic
+TARJETAS_PRONOSTICO = {
+    "lluvia": ("Distritos con lluvia", "gota", "#2F6FB5", "lluvia"),
+    "altas": (f"Distritos con temperaturas altas ({TEMPERATURA_ALTA} °C a más)", "termometro", "#E6550D", "temperatura"),
+    "bajas": (f"Distritos con temperaturas bajas ({TEMPERATURA_BAJA} °C o menos)", "copo", "#2171B5", "temperatura"),
+    "seco": ("Distritos sin lluvia", "sol", "#D98C00", "seco"),
+}
+UMBRALES_CALOR = [30, 33]           # temperatura máxima: calor (30 a 32 °C) y calor intenso (33 °C a más)
 COLOR_SIN_LOCALIDAD = "#E6EAF0"     # provincias sin localidad con pronóstico (gris claro)
 # Localidades del SENAMHI cuyo nombre no es el de su distrito: (departamento, localidad) -> (departamento,
 #   distrito, provincia). La provincia solo hace falta si hay dos distritos con el mismo nombre.
@@ -1282,6 +1304,12 @@ def estimar_fen(pm, forma):
 
 # ---- 3.7 Pronóstico climático (SENAMHI) ---------------------------------------------------------------
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+OTRAS_LOCALIDADES = "Otras localidades"   # localidades que no se pudieron ubicar en el mapa
+
+
+def ahora_lima():
+    """Fecha y hora de Lima (el servidor de Render está en hora UTC; el Perú no cambia de hora)."""
+    return pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(hours=5)
 
 
 def normalizar(texto):
@@ -1337,35 +1365,50 @@ def simplificar_provincias(geo, decimales=2):
     return {"type": "FeatureCollection", "features": rasgos}
 
 
+_MAPAS_PRONOSTICO = {"provincias": None, "distritos": None, "lugares": {}}   # se calculan una sola vez
+
+
+def geo_provincias():
+    if _MAPAS_PRONOSTICO["provincias"] is None:
+        _MAPAS_PRONOSTICO["provincias"] = simplificar_provincias(descargar_geojson(URL_GEOJSON_PROV, RUTA_GEOJSON_PROV))
+    return _MAPAS_PRONOSTICO["provincias"]
+
+
 def ubicar_localidades(pares):
-    """(departamento, localidad) -> distrito del mapa: provincia y punto en el mapa. Las que no se encuentran
-    quedan fuera del mapa (pero sí salen en el detalle)."""
-    dist = descargar_geojson(URL_GEOJSON_DIST, RUTA_GEOJSON_DIST)
-    dist = {"features": [f for f in dist["features"] if f.get("geometry")]}   # algunos distritos no traen forma
-    centros = centroides(dist, "IDDIST")
-    por_nombre = {}
-    for f in dist["features"]:
-        p = f["properties"]
-        dep = normalizar(p["NOMBDEP"])
-        capital = p.get("NOM_CAP") or ""
-        nombres = [p["NOMBDIST"], re.sub(r"\s*/\d+|\s*\(.*\)", "", capital)]
-        nombres += re.findall(r"\((.*?)\)", capital)            # «ESPINAR (YAURI)» -> también «YAURI»
-        if p["NOMBDIST"] == p["NOMBPROV"]:
-            nombres.append(p["NOMBPROV"])
-        for n in nombres:
-            por_nombre.setdefault((dep, normalizar(n)), []).append(p)
-    resultado = {}
-    for dep, loc in pares:
-        dep_d, nombre, provincia = ALIAS_LOCALIDADES.get((dep, loc), (dep, loc, None))
-        candidatos = por_nombre.get((dep_d, nombre), [])
-        if provincia:
-            candidatos = [p for p in candidatos if normalizar(p["NOMBPROV"]) == provincia] or candidatos
-        if candidatos and centros.get(candidatos[0]["IDDIST"]):
-            p = candidatos[0]
-            lon, lat = centros[p["IDDIST"]]
-            resultado[(dep, loc)] = {"idprov": str(p["IDPROV"]), "provincia": p["NOMBPROV"].title(),
-                                     "lon": lon, "lat": lat}
-    return resultado
+    """(departamento, localidad) -> distrito, provincia y punto del mapa. Las que no se encuentran quedan
+    fuera del mapa (pero sí salen en el detalle). Lo ya ubicado se guarda para la próxima vez."""
+    lugares = _MAPAS_PRONOSTICO["lugares"]
+    faltan = [par for par in pares if par not in lugares]
+    if faltan:
+        if _MAPAS_PRONOSTICO["distritos"] is None:
+            dist = descargar_geojson(URL_GEOJSON_DIST, RUTA_GEOJSON_DIST)
+            dist = {"features": [f for f in dist["features"] if f.get("geometry")]}   # algunos no traen forma
+            centros = centroides(dist, "IDDIST")
+            por_nombre = {}
+            for f in dist["features"]:
+                p = f["properties"]
+                dep, capital = normalizar(p["NOMBDEP"]), p.get("NOM_CAP") or ""
+                nombres = [p["NOMBDIST"], re.sub(r"\s*/\d+|\s*\(.*\)", "", capital)]
+                nombres += re.findall(r"\((.*?)\)", capital)          # «ESPINAR (YAURI)» -> también «YAURI»
+                if p["NOMBDIST"] == p["NOMBPROV"]:
+                    nombres.append(p["NOMBPROV"])
+                for n in nombres:
+                    por_nombre.setdefault((dep, normalizar(n)), []).append(p)
+            _MAPAS_PRONOSTICO["distritos"] = (por_nombre, centros)
+        por_nombre, centros = _MAPAS_PRONOSTICO["distritos"]
+        for dep, loc in faltan:
+            dep_d, nombre, provincia = ALIAS_LOCALIDADES.get((dep, loc), (dep, loc, None))
+            candidatos = por_nombre.get((dep_d, nombre), [])
+            if provincia:
+                candidatos = [p for p in candidatos if normalizar(p["NOMBPROV"]) == provincia] or candidatos
+            if candidatos and centros.get(candidatos[0]["IDDIST"]):
+                p = candidatos[0]
+                lon, lat = centros[p["IDDIST"]]
+                lugares[(dep, loc)] = {"idprov": str(p["IDPROV"]), "provincia": p["NOMBPROV"].title(),
+                                       "distrito": p["NOMBDIST"].title(), "lon": lon, "lat": lat}
+            else:
+                lugares[(dep, loc)] = {}
+    return {par: lugares.get(par, {}) for par in pares}
 
 
 def fecha_pronostico(texto, hoy=None):
@@ -1374,7 +1417,7 @@ def fecha_pronostico(texto, hoy=None):
     meses = [normalizar(x) for x in MESES]
     if not m or normalizar(m.group(2)) not in meses:
         return pd.NaT
-    hoy = hoy or pd.Timestamp.today()
+    hoy = hoy or ahora_lima()
     mes = meses.index(normalizar(m.group(2))) + 1
     anio = hoy.year + (1 if mes == 1 and hoy.month == 12 else 0) - (1 if mes == 12 and hoy.month == 1 else 0)
     return pd.Timestamp(year=anio, month=mes, day=int(m.group(1)))
@@ -1406,29 +1449,121 @@ def nivel_lluvia(descripcion):
     return 0
 
 
-def clase_calor(tmax):
-    return int(sum(tmax >= u for u in UMBRALES_CALOR))
+def clase_temperatura(tmax, tmin):
+    """0 helada · 1 frío · 2 templado · 3 calor · 4 calor intenso."""
+    if tmin <= HELADA:
+        return 0
+    if tmin <= TEMPERATURA_BAJA:
+        return 1
+    if tmax >= UMBRALES_CALOR[-1]:
+        return 4
+    if tmax >= TEMPERATURA_ALTA:
+        return 3
+    return 2
 
 
-def clase_frio(tmin):
-    for i, u in enumerate(UMBRALES_FRIO):
-        if tmin <= u:
-            return i
-    return len(UMBRALES_FRIO)
+def mas_intensa(clases):
+    """La clase más alejada de «Templado» (2); si empatan calor y frío, frío."""
+    return max(clases, key=lambda k: (abs(k - 2), -k))
+
+
+# ---- Lectura automática de la página del SENAMHI (mismo código del archivo de scraping) ----------------
+SELECTOR_DETALLE_SENAMHI = 'a[href*="pronostico-detalle"]'
+
+
+def _numero_web(texto):
+    m = re.search(r"-?\d+(?:[.,]\d+)?", texto or "")
+    return float(m.group(0).replace(",", ".")) if m else None
+
+
+def _texto_web(tag):
+    return " ".join(tag.get_text(" ", strip=True).split()) if tag else ""
+
+
+def _primero_web(nodo, *selectores):
+    """El primer selector que encuentre algo, en el orden dado."""
+    for selector in selectores:
+        tag = nodo.select_one(selector)
+        if tag:
+            return tag
+    return None
+
+
+def _de_la_fila(nodo, fila):
+    """True si el nodo es de esta fila y no de otra fila de localidad metida dentro de ella."""
+    for ancestro in nodo.parents:
+        if ancestro is fila:
+            return True
+        if ancestro.name == "tr" and ancestro.select_one(SELECTOR_DETALLE_SENAMHI):
+            return False
+    return False
+
+
+def descargar_pronostico_web(intentos=3, espera=40):
+    """Lee la tabla nacional del pronóstico en la página del SENAMHI. Devuelve una fila por localidad y día."""
+    import requests
+    from bs4 import BeautifulSoup
+    cabeceras = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/128.0.0.0 Safari/537.36"), "Referer": URL_SENAMHI}
+    error = None
+    for intento in range(intentos):
+        try:
+            respuesta = requests.get(URL_SENAMHI, headers=cabeceras, timeout=espera)
+            respuesta.raise_for_status()
+            break
+        except Exception as e:
+            error = e
+            time.sleep(2 * (intento + 1))
+    else:
+        raise error
+    if not respuesta.encoding or respuesta.encoding.lower() == "iso-8859-1":
+        respuesta.encoding = respuesta.apparent_encoding or "utf-8"
+    try:
+        sopa = BeautifulSoup(respuesta.text, "lxml")
+    except Exception:
+        sopa = BeautifulSoup(respuesta.text, "html.parser")
+    registros = []
+    for tr in sopa.select("table tr"):
+        enlace = next((a for a in tr.select(SELECTOR_DETALLE_SENAMHI) if _de_la_fila(a, tr)), None)
+        if not enlace:
+            continue
+        url = urllib.parse.urljoin("https://www.senamhi.gob.pe/", enlace.get("href", "").strip())
+        consulta = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        celdas = [td for td in tr.find_all("td") if _de_la_fila(td, tr)]
+        textos = [t for t in celdas[0].stripped_strings if t] if celdas else []
+        if not textos:
+            continue
+        departamento, localidad = (textos[0], textos[1]) if len(textos) >= 2 else ("", textos[0])
+        for bloque in [b for b in tr.select("div.row.m-3") if _de_la_fila(b, tr)]:
+            tmax = _primero_web(bloque, "h1.text-danger", "span.text-danger", ".text-danger")
+            tmin = _primero_web(bloque, "h1.text-primary", "span.text-primary", ".text-primary")
+            imagen = bloque.select_one("img")
+            registros.append({
+                "cod_dp": consulta.get("dp", [""])[0].zfill(2),
+                "departamento": departamento.upper(),
+                "cod_localidad": consulta.get("localidad", [""])[0].zfill(4),
+                "localidad": localidad.upper(),
+                "fecha_texto": _texto_web(_primero_web(bloque, "div.col-sm-3", "strong")),
+                "temp_max_c": _numero_web(tmax.get_text(strip=True)) if tmax else None,
+                "temp_min_c": _numero_web(tmin.get_text(strip=True)) if tmin else None,
+                "descripcion": _texto_web(_primero_web(bloque, "div.col-sm-5", "p")),
+                "icono": ((imagen.get("src") or imagen.get("data-src") or "") if imagen else "").split("/")[-1],
+                "url_detalle": url})
+    tabla = pd.DataFrame(registros)
+    if tabla.empty:
+        raise ValueError("La página del SENAMHI no trajo pronósticos (¿cambió su diseño?).")
+    return tabla
 
 
 def archivo_pronostico():
     return next((r for r in ARCHIVOS_PRONOSTICO if os.path.exists(r)), None)
 
 
-def cargar_pronostico():
-    """Una fila por localidad y día, con la clase de cada botón y su lugar en el mapa. Si no está, None."""
-    ruta = archivo_pronostico()
-    if ruta is None:
-        return None
-    df = pd.read_excel(ruta, sheet_name=HOJA_PRONOSTICO)
+def preparar_pronostico(crudo, origen, actualizado):
+    """Una fila por localidad y día, con la clase de cada botón y su lugar en el mapa."""
+    df = crudo.copy()
     df.columns = df.columns.astype(str).str.strip()
-    # La descarga del SENAMHI repite filas: la primera de cada localidad y día es la que vale
+    # Las descargas viejas repetían filas: la primera de cada localidad y día es la que vale
     df = df.drop_duplicates(subset=["cod_dp", "cod_localidad", "fecha_texto"], keep="first").copy()
     df["dpto"] = df["departamento"].map(normalizar)
     df["clave_loc"] = df["localidad"].map(normalizar)
@@ -1439,23 +1574,87 @@ def cargar_pronostico():
     df["fecha"] = [fecha_pronostico(t) for t in df["fecha_texto"]]
     df = df.dropna(subset=["fecha", "tmax", "tmin"]).reset_index(drop=True)
     df["c_lluvia"] = df["descripcion"].map(nivel_lluvia)
-    df["c_calor"] = df["tmax"].map(clase_calor)
-    df["c_frio"] = df["tmin"].map(clase_frio)
+    df["c_temperatura"] = [clase_temperatura(a, b) for a, b in zip(df["tmax"], df["tmin"])]
     despejado = df["descripcion"].str.lower().str.contains("despejado|brillo solar")
     df["c_seco"] = np.where(df["c_lluvia"] > 0, 2, np.where(despejado, 0, 1))
     try:
         lugares = ubicar_localidades(set(zip(df["dpto"], df["clave_loc"])))
-        geo_prov = simplificar_provincias(descargar_geojson(URL_GEOJSON_PROV, RUTA_GEOJSON_PROV))
-    except Exception:   # sin mapa de provincias: el tablero funciona igual, sin colores por provincia
+        geo_prov = geo_provincias()
+    except Exception:   # sin mapas: el tablero funciona igual, sin colores por provincia
         lugares, geo_prov = {}, {"type": "FeatureCollection", "features": []}
-    for col in ("idprov", "provincia", "lon", "lat"):
+    for col in ("idprov", "provincia", "distrito", "lon", "lat"):
         df[col] = [lugares.get(k, {}).get(col) for k in zip(df["dpto"], df["clave_loc"])]
     df["provincia"] = df["provincia"].fillna("")
-    fechas = sorted(df["fecha"].unique())
-    return {"datos": df, "fechas": [pd.Timestamp(f) for f in fechas], "geo_prov": geo_prov,
+    df["distrito"] = df["distrito"].fillna(df["localidad"])
+    return {"datos": df, "fechas": [pd.Timestamp(f) for f in sorted(df["fecha"].unique())], "geo_prov": geo_prov,
             "nombres_prov": {f["properties"]["IDPROV"]: f["properties"]["NOMBPROV"].title()
                              for f in geo_prov["features"]},
-            "sin_mapa": sorted(df.loc[df["idprov"].isna(), "localidad"].unique())}
+            "sin_mapa": sorted(df.loc[df["idprov"].isna(), "localidad"].unique()),
+            "origen": origen, "actualizado": actualizado}
+
+
+def cargar_pronostico(web=True, intentos=3):
+    """Primero la página del SENAMHI; si no responde, el último Excel de la carpeta. Si no hay nada, None."""
+    if web:
+        try:
+            crudo = descargar_pronostico_web(intentos=intentos)
+            _PRONOSTICO["error"] = ""
+            return preparar_pronostico(crudo, "web", ahora_lima().strftime("%d/%m/%Y %H:%M"))
+        except Exception as error:
+            _PRONOSTICO["error"] = f"{type(error).__name__}: {error}"
+    ruta = archivo_pronostico()
+    if ruta is None:
+        return None
+    crudo = pd.read_excel(ruta, sheet_name=HOJA_PRONOSTICO)
+    consulta = pd.to_datetime(crudo.get("fecha_consulta"), errors="coerce") if "fecha_consulta" in crudo else None
+    if consulta is not None and consulta.notna().any():
+        actualizado = consulta.max().strftime("%d/%m/%Y %H:%M")
+    else:
+        actualizado = fecha_excel(ruta) or "—"
+    return preparar_pronostico(crudo, "excel", actualizado)
+
+
+# Pronóstico que se muestra y su actualización automática (en segundo plano, sin hacer esperar a nadie)
+_PRONOSTICO = {"datos": None, "revisado": 0.0, "actualizando": False, "error": ""}
+_CANDADO_PRONOSTICO = threading.Lock()
+
+
+def iniciar_pronostico():
+    """Al encender el tablero: un intento rápido en la web del SENAMHI y, si falla, el Excel."""
+    _PRONOSTICO["datos"] = cargar_pronostico(web=True, intentos=1)
+    _PRONOSTICO["revisado"] = time.time()
+    return _PRONOSTICO["datos"]
+
+
+def pronostico_vigente():
+    return _PRONOSTICO["datos"]
+
+
+def revisar_pronostico():
+    """Si el pronóstico ya está viejo, pide uno nuevo a la web del SENAMHI en segundo plano."""
+    datos = _PRONOSTICO["datos"]
+    al_dia = (datos is not None and datos["origen"] == "web"
+              and datos["fechas"] and datos["fechas"][0].date() >= ahora_lima().date())
+    espera = ACTUALIZAR_PRONOSTICO_HORAS * 3600 if al_dia else REINTENTAR_PRONOSTICO_MINUTOS * 60
+    if time.time() - _PRONOSTICO["revisado"] < espera:
+        return
+    with _CANDADO_PRONOSTICO:
+        if _PRONOSTICO["actualizando"]:
+            return
+        _PRONOSTICO["actualizando"] = True
+    threading.Thread(target=_actualizar_pronostico, daemon=True).start()
+
+
+def _actualizar_pronostico():
+    try:
+        crudo = descargar_pronostico_web()
+        _PRONOSTICO["datos"] = preparar_pronostico(crudo, "web", ahora_lima().strftime("%d/%m/%Y %H:%M"))
+        _PRONOSTICO["error"] = ""
+    except Exception as error:   # se queda el pronóstico anterior; se reintenta más tarde
+        _PRONOSTICO["error"] = f"{type(error).__name__}: {error}"
+    finally:
+        _PRONOSTICO["revisado"] = time.time()
+        _PRONOSTICO["actualizando"] = False
 
 
 def pronostico_del(pron, dia, dpto):
@@ -1463,6 +1662,16 @@ def pronostico_del(pron, dia, dpto):
     d = pron["datos"]
     d = d[d["fecha"] == pd.Timestamp(dia)]
     return d if dpto in (None, NACIONAL) else d[d["dpto"] == dpto]
+
+
+def por_distrito(d):
+    """Una fila por distrito (si un distrito tiene varias localidades, manda la más extrema)."""
+    t = d.groupby(["dpto", "provincia", "distrito"], as_index=False).agg(
+        c_lluvia=("c_lluvia", "max"), tmax=("tmax", "max"), tmin=("tmin", "min"),
+        despejado=("c_seco", lambda s: bool((s == 0).all())))
+    t["c_temperatura"] = [clase_temperatura(a, b) for a, b in zip(t["tmax"], t["tmin"])]
+    t["c_seco"] = np.where(t["c_lluvia"] > 0, 2, np.where(t["despejado"], 0, 1))
+    return t
 
 
 # =============================================================================
@@ -2552,7 +2761,8 @@ def lugar_texto(fila, con_dpto=True):
 
 
 def grafico_mapa_pronostico(pron, dia, modo, dpto, geo_dptos):
-    """Gráfico 1: provincias con el color de su clase (manda la localidad más extrema) y un punto por localidad."""
+    """Gráfico 1: cada provincia con el color de su localidad más extrema (las zonas «sin color» quedan en
+    blanco y las provincias sin localidad con pronóstico, en gris)."""
     cfg = MODOS_PRONOSTICO[modo]
     col, clases = f"c_{modo}", cfg["clases"]
     d = pronostico_del(pron, dia, dpto)
@@ -2561,8 +2771,9 @@ def grafico_mapa_pronostico(pron, dia, modo, dpto, geo_dptos):
         rasgos = [f for f in rasgos if f["properties"]["NOMBDEP"] == dpto]
     geo = {"type": "FeatureCollection", "features": rasgos}
     con_mapa = d.dropna(subset=["idprov"])
-    por_prov = con_mapa.groupby("idprov").agg(clase=(col, cfg["extremo"]), n=("localidad", "size"),
-                                              tmax=("tmax", "max"), tmin=("tmin", "min"))
+    por_prov = con_mapa.groupby("idprov").agg(
+        clase=(col, mas_intensa if cfg["extremo"] == "intenso" else cfg["extremo"]), n=("localidad", "size"), tmax=("tmax", "max"), tmin=("tmin", "min"),
+        distritos=("distrito", lambda s: ", ".join(list(dict.fromkeys(s))[:4]) + (" …" if s.nunique() > 4 else "")))
     fig = go.Figure()
     ids = [f["properties"]["IDPROV"] for f in rasgos]
     sin = [i for i in ids if i not in por_prov.index]
@@ -2570,40 +2781,31 @@ def grafico_mapa_pronostico(pron, dia, modo, dpto, geo_dptos):
         fig.add_trace(go.Choropleth(
             geojson=geo, featureidkey="properties.IDPROV", locations=sin, z=[1] * len(sin), showscale=False,
             colorscale=[[0, COLOR_SIN_LOCALIDAD], [1, COLOR_SIN_LOCALIDAD]], name="Sin localidad con pronóstico",
-            showlegend=True, legendrank=2000, marker=dict(line=dict(color="#ffffff", width=0.5)), customdata=[pron["nombres_prov"].get(i, "") for i in sin],
+            showlegend=True, legendrank=2000, marker=dict(line=dict(color="#ffffff", width=0.5)),
+            customdata=[pron["nombres_prov"].get(i, "") for i in sin],
             hovertemplate="<b>%{customdata}</b><br>Sin localidad con pronóstico<extra></extra>"))
     orden = list(enumerate(clases))
-    if cfg["extremo"] == "max":
-        orden = orden[::-1]   # en la leyenda, primero la clase más intensa
-    for k, (nombre, color) in orden:
+    if modo != "seco":
+        orden = orden[::-1]   # en la leyenda, de la clase más alta a la más baja
+    for k, (nombre, color, _) in orden:
         sub = por_prov[por_prov["clase"] == k]
         if sub.empty:
             continue
         fig.add_trace(go.Choropleth(
             geojson=geo, featureidkey="properties.IDPROV", locations=list(sub.index), z=[1] * len(sub),
             showscale=False, colorscale=[[0, color], [1, color]], name=nombre, showlegend=True,
-            marker=dict(line=dict(color="#c9d3de" if k == cfg.get("neutra") else "#ffffff", width=0.6)),
-            customdata=[[pron["nombres_prov"].get(i, ""), int(r["n"]), int(r["tmax"]), int(r["tmin"])]
+            marker=dict(line=dict(color="#c9d3de" if k == cfg["neutra"] else "#ffffff", width=0.6)),
+            customdata=[[pron["nombres_prov"].get(i, ""), int(r["n"]), int(r["tmax"]), int(r["tmin"]), r["distritos"]]
                         for i, r in sub.iterrows()],
-            hovertemplate=("<b>%{customdata[0]}</b><br>" + nombre + "<br>%{customdata[1]} localidad(es) · "
-                           "máx. %{customdata[2]} °C · mín. %{customdata[3]} °C<extra></extra>")))
+            hovertemplate=("<b>%{customdata[0]}</b> · " + nombre.replace(" (sin color)", "") +
+                           "<br>Distritos: %{customdata[4]}<br>Máx. %{customdata[2]} °C · mín. %{customdata[3]} °C"
+                           "<extra></extra>")))
     deps = [f["properties"]["NOMBDEP"] for f in geo_dptos["features"]
             if dpto == NACIONAL or f["properties"]["NOMBDEP"] == dpto]
     fig.add_trace(go.Choropleth(   # bordes de los departamentos
         geojson=geo_dptos, featureidkey=CLAVE_GEOJSON, locations=deps, z=[1] * len(deps), showscale=False,
         colorscale=[[0, "rgba(0,0,0,0)"], [1, "rgba(0,0,0,0)"]], showlegend=False, hoverinfo="skip",
         marker=dict(line=dict(color="#4f6377", width=1.1))))
-    if not con_mapa.empty:
-        tam = 8 if dpto == NACIONAL else 12
-        neutras = [int(c) == cfg.get("neutra") for c in con_mapa[col]]   # sin lluvia: punto chico y gris
-        fig.add_trace(go.Scattergeo(
-            lon=con_mapa["lon"], lat=con_mapa["lat"], mode="markers", showlegend=False,
-            marker=dict(size=[tam * 0.6 if n else tam for n in neutras], color=[clases[int(c)][1] for c in con_mapa[col]],
-                        line=dict(color=["#9aa9b8" if n else C["tinta"] for n in neutras], width=0.9)),
-            customdata=[[r["localidad"], lugar_texto(r), int(r["tmax"]), int(r["tmin"]),
-                         texto_en_lineas(r["descripcion"]), clases[int(r[col])][0]] for _, r in con_mapa.iterrows()],
-            hovertemplate=("<b>%{customdata[0]}</b> (%{customdata[1]})<br>%{customdata[5]} · máx. %{customdata[2]} °C"
-                           " · mín. %{customdata[3]} °C<br><i>%{customdata[4]}</i><extra></extra>")))
     fig.update_geos(fitbounds="locations", visible=False, bgcolor="rgba(0,0,0,0)", projection_type="mercator")
     fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
                       legend=dict(orientation="v", x=0.01, y=0.02, yanchor="bottom", traceorder="normal",
@@ -2612,83 +2814,79 @@ def grafico_mapa_pronostico(pron, dia, modo, dpto, geo_dptos):
     return fig
 
 
-def grafico_ranking_pronostico(pron, dia, modo, dpto):
-    """Gráfico 2: Lluvias y Sin lluvias -> por departamento (o provincia); Calor y Frío -> las 15 localidades
-    más extremas."""
+def grafico_barras_pronostico(pron, dia, modo, dpto):
+    """Gráfico 3: una barra por departamento (o por provincia del departamento elegido)."""
     cfg = MODOS_PRONOSTICO[modo]
     clases, col = cfg["clases"], f"c_{modo}"
-    d = pronostico_del(pron, dia, dpto).copy()
+    d = pronostico_del(pron, dia, dpto)
     if d.empty:
         return figura_vacia("Sin pronóstico para esta selección.")
     nacional = dpto == NACIONAL
+    d = d.assign(grupo=d["dpto"].map(nombre_visible) if nacional else d["provincia"].replace("", OTRAS_LOCALIDADES))
     fig = go.Figure()
-    if modo in ("lluvia", "seco"):
-        d["grupo"] = d["dpto"].map(nombre_visible) if nacional else d["provincia"].replace("", "Sin ubicar")
-        if modo == "lluvia":
-            tabla = d.pivot_table(index="grupo", columns=col, values="localidad", aggfunc="count", fill_value=0)
-            tabla = tabla.reindex(columns=range(len(clases)), fill_value=0)
-            tabla["total"] = tabla[[1, 2, 3]].sum(axis=1)
-            tabla = tabla.sort_values(["total", 3, 2]).tail(25)
-            for k in (3, 2, 1):
-                fig.add_bar(y=tabla.index, x=tabla[k], orientation="h", name=clases[k][0], marker_color=clases[k][1],
-                            hovertemplate="<b>%{y}</b> · " + clases[k][0] + ": %{x}<extra></extra>")
-            fig.add_scatter(y=tabla.index, x=tabla["total"], mode="text", text=[f"  {int(v)}" for v in tabla["total"]],
-                            textposition="middle right", showlegend=False, hoverinfo="skip", cliponaxis=False,
-                            textfont=dict(size=11, color=COLOR_AZUL_PPT))
-            tope, titulo_x = max(tabla["total"].max(), 1) * 1.15, "N.º de localidades con lluvia"
-        else:
-            tabla = d.groupby("grupo").agg(secas=(col, lambda s: int((s < 2).sum())), n=(col, "size"))
-            tabla["pct"] = tabla["secas"] / tabla["n"] * 100
-            tabla = tabla.sort_values(["pct", "secas"]).tail(25)
-            fig.add_bar(y=tabla.index, x=tabla["pct"], orientation="h", marker_color=clases[0][1], showlegend=False,
-                        text=[f"{int(s)} de {int(n)}" for s, n in zip(tabla["secas"], tabla["n"])],
-                        textposition="outside", cliponaxis=False, textfont=dict(size=11, color=COLOR_AZUL_PPT),
-                        hovertemplate="<b>%{y}</b>: %{x:.0f} % de sus localidades sin lluvia<extra></extra>")
-            tope, titulo_x = 118, "% de localidades sin lluvia"
-        fig.update_layout(barmode="stack", bargap=0.25, margin=dict(l=4, r=8, t=30, b=4), legend=dict(y=1.02),
-                          xaxis=dict(range=[0, tope], title=titulo_x, showgrid=True, gridcolor=C["rejilla"]),
-                          yaxis=dict(tickfont=dict(size=11, color=C["tinta"])))
-        return fig
-    columna = "tmax" if modo == "calor" else "tmin"
-    top = (d.nlargest(15, "tmax") if modo == "calor" else d.nsmallest(15, "tmin")).iloc[::-1]
-    nombres = [f"{r['localidad']} ({nombre_visible(r['dpto']) if nacional else r['provincia'] or 's/u'})"
-               for _, r in top.iterrows()]
-    fig.add_bar(y=nombres, x=top[columna], orientation="h", showlegend=False,
-                marker=dict(color=[clases[int(c)][1] for c in top[col]], line=dict(color=C["tinta"], width=0.6)),
-                text=[f"{int(v)} °C" for v in top[columna]], textposition="outside", cliponaxis=False,
-                textfont=dict(size=11, color=COLOR_AZUL_PPT), customdata=[texto_en_lineas(t) for t in top["descripcion"]],
-                hovertemplate="<b>%{y}</b>: %{x} °C<br><i>%{customdata}</i><extra></extra>")
-    bajo, alto = min(0, top[columna].min() - 2), max(0, top[columna].max()) * 1.15 + 1
-    fig.update_layout(bargap=0.25, margin=dict(l=4, r=8, t=10, b=4),
-                      xaxis=dict(range=[bajo, alto], ticksuffix=" °C", showgrid=True, gridcolor=C["rejilla"],
-                                 zeroline=True, zerolinecolor=C["contexto"]),
-                      yaxis=dict(tickfont=dict(size=11, color=C["tinta"])))
+    pista = "#EDF1F6"   # fondo gris de cada barra
+    if True:   # % de localidades de cada lugar en cada clase (lo que no se pinta queda en gris)
+        tabla = d.pivot_table(index="grupo", columns=col, values="localidad", aggfunc="count", fill_value=0)
+        tabla = tabla.reindex(columns=range(len(clases)), fill_value=0)
+        tabla["n"] = tabla.sum(axis=1)
+        pintar = {"lluvia": [3, 2, 1], "temperatura": [4, 3, 1, 0], "seco": [0, 1]}[modo]
+        tabla["si"] = tabla[pintar].sum(axis=1)
+        tabla = tabla.sort_values(["si", "n"], ascending=[False, True])
+        tabla = tabla.assign(pct=tabla["si"] / tabla["n"] * 100)
+        for k in pintar:
+            nombre, color, _ = clases[k]
+            fig.add_bar(y=tabla.index, x=tabla[k] / tabla["n"] * 100, orientation="h", name=nombre,
+                        marker=dict(color=color, line=dict(width=0)), customdata=tabla[k],
+                        hovertemplate="<b>%{y}</b> · " + nombre + ": %{customdata} localidades<extra></extra>")
+        fig.add_bar(y=tabla.index, x=100 - tabla["pct"], orientation="h", showlegend=False, hoverinfo="skip",
+                    marker=dict(color=pista, line=dict(width=0)))
+        fig.add_scatter(y=tabla.index, x=[101] * len(tabla), mode="text", showlegend=False, hoverinfo="skip",
+                        text=[f"<b>{int(s)}</b> de {int(n)}" for s, n in zip(tabla["si"], tabla["n"])],
+                        textposition="middle right", textfont=dict(size=11.5, color=COLOR_AZUL_PPT), cliponaxis=False)
+        tope = 122
+    fig.update_layout(
+        barmode="stack", bargap=0.34, margin=dict(l=4, r=12, t=34, b=4), hovermode="closest",
+        legend=dict(orientation="h", x=0, y=1.02, yanchor="bottom", traceorder="normal", font=dict(size=11.5)),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, color=C["tinta"]), showgrid=False, ticks=""),
+        xaxis=dict(visible=False, range=[0, tope]))
     return fig
 
 
 def grafico_dias_pronostico(pron, dia, modo, dpto):
-    """Gráfico 3: los días del pronóstico, con el número de localidades de cada clase (resalta el día elegido)."""
+    """Gráfico 2: los días del pronóstico, con el número de localidades de cada clase (resalta el día elegido)."""
     cfg = MODOS_PRONOSTICO[modo]
     clases, col = cfg["clases"], f"c_{modo}"
     d = pron["datos"] if dpto == NACIONAL else pron["datos"][pron["datos"]["dpto"] == dpto]
     tabla = d.pivot_table(index="fecha", columns=col, values="localidad", aggfunc="count", fill_value=0)
     tabla = tabla.reindex(index=pron["fechas"], columns=range(len(clases)), fill_value=0)
     etiquetas = [dia_corto(f) for f in tabla.index]
-    opacidad = [1 if f == pd.Timestamp(dia) else 0.45 for f in tabla.index]
+    elegido = etiquetas[list(tabla.index).index(pd.Timestamp(dia))] if pd.Timestamp(dia) in tabla.index else None
+    visibles = [k for k in range(len(clases)) if k != cfg["neutra"]]
+    orden = visibles   # de abajo hacia arriba
     fig = go.Figure()
-    orden = range(len(clases)) if cfg["extremo"] == "max" else reversed(range(len(clases)))
-    for k in orden:   # abajo, la clase menos intensa
-        nombre, color = clases[k]
-        fig.add_bar(x=etiquetas, y=tabla[k], name=nombre, marker=dict(color=color, opacity=opacidad,
-                                                                       line=dict(color="#c9d3de", width=0.8)),
-                    text=[int(v) if v >= tabla.sum(axis=1).max() * 0.06 else "" for v in tabla[k]],
-                    textposition="inside", insidetextanchor="middle",
-                    textfont=dict(size=11, color=texto_sobre(color)),
+    alto = max(tabla[visibles].sum(axis=1).max(), 1)
+    for k in orden:
+        nombre, color, _ = clases[k]
+        fig.add_bar(x=etiquetas, y=tabla[k], name=nombre.replace(" (sin color)", ""),
+                    marker=dict(color=color, line=dict(color="#ffffff", width=1)),
+                    text=[int(v) if v >= alto * 0.07 else "" for v in tabla[k]], textposition="inside",
+                    insidetextanchor="middle", textfont=dict(size=12, color=texto_sobre(color)),
                     hovertemplate="%{x} · " + nombre + ": %{y} localidades<extra></extra>")
-    fig.update_layout(barmode="stack", bargap=0.35, margin=dict(l=4, r=4, t=36, b=4),
-                      legend=dict(y=1.04, traceorder="reversed" if cfg["extremo"] == "max" else "normal"),
-                      xaxis=dict(type="category", tickfont=dict(size=12, color=C["tinta"])),
-                      yaxis=dict(title="N.º de localidades"))
+    totales = tabla[visibles].sum(axis=1)
+    nombre_total = {"lluvia": "con lluvia", "temperatura": "con calor o frío", "seco": "sin lluvia"}[modo]
+    for x, v in zip(etiquetas, totales):
+        fig.add_annotation(x=x, y=v, yshift=14, showarrow=False, text=f"<b>{int(v)}</b> {nombre_total}",
+                           font=dict(size=12, color=COLOR_AZUL_PPT))
+    if elegido:   # franja azul detrás del día elegido
+        i = etiquetas.index(elegido)
+        fig.add_shape(type="rect", xref="x", yref="paper", x0=i - 0.5, x1=i + 0.5, y0=0, y1=1, layer="below",
+                      fillcolor=C["azul_suave"], line=dict(width=0))
+    fig.update_layout(barmode="stack", bargap=0.42, margin=dict(l=4, r=4, t=40, b=4),
+                      legend=dict(orientation="h", x=0, y=1.03, yanchor="bottom", font=dict(size=11.5),
+                                  traceorder="normal" if modo == "seco" else "reversed"),
+                      xaxis=dict(type="category", tickfont=dict(size=12.5, color=C["tinta"]),
+                                 tickvals=etiquetas, ticktext=[f"<b>{e}</b>" if e == elegido else e for e in etiquetas]),
+                      yaxis=dict(title="N.º de localidades", range=[0, alto * 1.18]))
     return fig
 
 
@@ -2819,10 +3017,10 @@ def cabecera_pagina(antetitulo="", titulo="", subtitulo="", prefijo=None):
         html.P(subtitulo, className="cabecera-sub", **ids("sub"))])
 
 
-def cuadro_fuente(fuente, datos_hasta, clave, nota=None):
+def cuadro_fuente(fuente, datos_hasta, clave, nota=None, actualizado=None):
     """Cuadro de la barra lateral: Fuente · Datos hasta · Actualizado."""
     filas = [("Fuente", fuente.replace("Fuente: ", "").strip().rstrip(".")), ("Datos hasta", datos_hasta),
-             ("Actualizado", fecha_actualizacion(clave))]
+             ("Actualizado", actualizado or fecha_actualizacion(clave))]
     hijos = [html.Div(className="fuente-fila", children=[html.Span(t, className="fuente-etiqueta"),
                                                          html.Span(v, className="fuente-valor")])
              for t, v in filas]
@@ -3413,33 +3611,53 @@ def barra_lateral_pronostico(pron):
         html.Div(className="seleccion", children=[html.Div(id="pron-lateral-dia", className="seleccion-pais"),
                                                   html.Div(id="pron-lateral-lugar", className="seleccion-dpto")]),
         html.Div(className="controles", children=[
+            html.Label([icono("calendario"), "Día"], className="control-etiqueta"),
+            dcc.RadioItems(id="pron-dia", value=fechas[0].strftime("%Y-%m-%d"), className="control-radio",
+                           options=[{"label": dia_largo(f).capitalize(), "value": f.strftime("%Y-%m-%d")}
+                                    for f in fechas]),
             html.Label([icono("mapa"), "Departamento"], className="control-etiqueta"),
             dcc.Dropdown(id="pron-dpto", value=NACIONAL, clearable=False,
                          options=[{"label": "Todo el Perú", "value": NACIONAL}]
                                  + [{"label": nombre_visible(d), "value": d} for d in dptos]),
             html.Button("Volver a todo el Perú", id="pron-btn-reiniciar", n_clicks=0, className="boton-secundario")]),
-        html.P("El día se elige arriba, en la banda azul. Haz clic en el mapa para acercarte a un departamento.",
-               className="lateral-ayuda"),
-        cuadro_fuente(FUENTE_PRONOSTICO, f"Pronóstico hasta el {dia_largo(fechas[-1])}", "pronostico"),
+        html.P("Haz clic en el mapa para acercarte a un departamento.", className="lateral-ayuda"),
+        cuadro_fuente(FUENTE_PRONOSTICO, f"Pronóstico hasta el {dia_largo(fechas[-1])}", "pronostico",
+                      actualizado=pron["actualizado"]),
     ])
 
 
-def tarjeta_pronostico(modo):
-    """Tarjeta de arriba; también es un botón: al hacer clic, el mapa muestra ese tema."""
-    cfg = MODOS_PRONOSTICO[modo]
-    return html.Div(id=f"pron-kpi-{modo}", n_clicks=0, className="kpi kpi-boton",
-                    style={"borderTop": f"4px solid {cfg['color']}"}, children=[
+def cabecera_pronostico(pron):
+    """Banda azul: lugar y día, un resumen en una frase y cuándo se actualizó."""
+    web = pron["origen"] == "web"
+    estado = html.Div(className="pron-hero-estado" + ("" if web else " pron-hero-estado-archivo"), children=[
+        html.Span(className="pron-punto"),
+        html.Div([html.Strong("Se actualiza solo" if web else "Datos del último archivo"),
+                  html.Span(f"Web del SENAMHI · {pron['actualizado']}" if web else
+                            f"La web del SENAMHI no respondió; se vuelve a intentar sola · {pron['actualizado']}")])])
+    return html.Header(className="pron-hero", children=[
+        html.Div(className="pron-hero-texto", children=[
+            html.P([icono("nube"), "Pronóstico climático · SENAMHI"], className="pron-hero-antetitulo"),
+            html.H1(id="pron-titulo"),
+            html.P(id="pron-sub", className="pron-hero-sub")]),
+        estado])
+
+
+def tarjeta_pronostico(clave):
+    """Tarjeta de arriba (número de distritos); también es un botón: al hacer clic, el mapa muestra ese tema."""
+    titulo, nombre_icono, color, _ = TARJETAS_PRONOSTICO[clave]
+    return html.Div(id=f"pron-kpi-{clave}", n_clicks=0, className="kpi kpi-boton",
+                    style={"borderTop": f"4px solid {color}"}, children=[
         html.Div(className="kpi-cabeza", children=[
-            html.Span(icono(cfg["icono"]), className="kpi-icono",
-                      style={"background": hex_a_rgba(cfg["color"], 0.14), "color": cfg["color"]}),
-            html.Span(cfg["tarjeta"], className="kpi-titulo")]),
-        html.Div(id=f"pron-kpi-{modo}-valor", className="kpi-valor"),
-        html.Div(id=f"pron-kpi-{modo}-nota", className="kpi-delta"),
+            html.Span(icono(nombre_icono), className="kpi-icono",
+                      style={"background": hex_a_rgba(color, 0.14), "color": color}),
+            html.Span(titulo, className="kpi-titulo")]),
+        html.Div(id=f"pron-kpi-{clave}-valor", className="kpi-valor"),
+        html.Div(id=f"pron-kpi-{clave}-nota", className="kpi-delta"),
         html.Span(["Ver en el mapa", icono("flecha")], className="kpi-ver")])
 
 
 def botones_pronostico():
-    """Los botones grandes que cambian lo que muestra el mapa."""
+    """Los botones grandes que cambian lo que muestran el mapa, el detalle y los gráficos."""
     return html.Div(className="pildoras-fila", children=[
         html.Span("Ver en el mapa:", className="pildoras-etiqueta"),
         dcc.RadioItems(id="pron-modo", value="lluvia", className="pildoras", inline=True,
@@ -3447,74 +3665,77 @@ def botones_pronostico():
                                  "value": k} for k, cfg in MODOS_PRONOSTICO.items()])])
 
 
-def cabecera_pronostico(pron):
-    """Banda azul: qué se ve (lugar y día), un resumen en una frase y los días como botones."""
-    fechas = pron["fechas"]
-    return html.Header(className="pron-hero", children=[
-        html.Div(className="pron-hero-texto", children=[
-            html.P([icono("nube"), "Pronóstico climático · SENAMHI"], className="pron-hero-antetitulo"),
-            html.H1(id="pron-titulo"),
-            html.P(id="pron-sub", className="pron-hero-sub")]),
-        html.Div(className="pron-hero-dias", children=[
-            html.Span("Elige el día", className="pron-hero-etiqueta"),
-            dcc.RadioItems(id="pron-dia", value=fechas[0].strftime("%Y-%m-%d"), className="pildoras pildoras-dia",
-                           inline=True, options=[{"label": html.Span(
-                               [html.Span(DIAS_SEMANA[f.weekday()][:3]), html.Span(str(f.day), className="pildora-num"),
-                                html.Span(MESES[f.month - 1][:3].lower())], className="pildora pildora-dia"),
-                               "value": f.strftime("%Y-%m-%d")} for f in fechas])])])
-
-
 def crear_layout_pronostico(pron):
-    """título · 4 tarjetas-botón · [G1 mapa con botones | G2 ranking] · [G3 próximos días | detalle por localidad]"""
-    cabecera = cabecera_pronostico(pron)
-    nota_mapa = ("cada punto es una localidad con pronóstico del SENAMHI; cada provincia toma el valor más extremo "
-                 "de sus localidades.")
+    """banda azul · 4 tarjetas-botón · [G1 mapa | detalle por distrito] · [G2 próximos días | G3 barras]"""
+    nota_mapa = "cada provincia toma el color de su localidad más extrema; en blanco, las zonas sin color del botón."
     if pron["sin_mapa"]:
         nota_mapa += f" {len(pron['sin_mapa'])} localidades no se pudieron ubicar en el mapa (sí están en el detalle)."
-    fila_1 = html.Div(className="fila fila-2", children=[
-        panel("pron-graf-1", "", "pron-1", alto=600, numero_grafico=1, nota=nota_mapa, fuente=FUENTE_PRONOSTICO,
-              leyenda=botones_pronostico()),
-        panel("pron-graf-2", "", "pron-2", alto=650, numero_grafico=2, fuente=FUENTE_PRONOSTICO)])
-    detalle = html.Section(className="panel area-pron-4", children=[
+    detalle = html.Section(className="panel area-pron-detalle", children=[
         html.Header(className="panel-cabecera", children=[
-            html.H3([html.Span("Detalle por localidad: ", className="panel-numero"),
+            html.H3([html.Span("Detalle: ", className="panel-numero"),
                      html.Span(id="pron-tabla-titulo")], className="panel-titulo"),
-            html.P("(Ordenado según el botón elegido; «Ver» abre el pronóstico en la página del SENAMHI)",
-                   className="panel-unidad")]),
+            html.P(id="pron-tabla-unidad", className="panel-unidad")]),
+        html.Div(className="tabla-herramientas", children=[
+            dcc.Input(id="pron-buscar", type="search", debounce=True, className="buscador",
+                      placeholder="Buscar departamento, provincia o distrito…"),
+            html.Span(id="pron-tabla-conteo", className="tabla-conteo")]),
         html.Div(id="pron-tabla", className="tabla-scroll"),
         html.P(FUENTE_PRONOSTICO, className="panel-pie")])
+    fila_1 = html.Div(className="fila fila-2", children=[
+        panel("pron-graf-1", "", "pron-1", alto=620, numero_grafico=1, nota=nota_mapa, fuente=FUENTE_PRONOSTICO,
+              leyenda=botones_pronostico()), detalle])
     fila_2 = html.Div(className="fila fila-2", children=[
-        panel("pron-graf-3", "", "pron-3", alto=400, numero_grafico=3, fuente=FUENTE_PRONOSTICO,
-              nota="el día elegido se ve con color pleno; los otros, más claros."), detalle])
+        panel("pron-graf-2", "", "pron-2", alto=520, numero_grafico=2, fuente=FUENTE_PRONOSTICO,
+              nota="la franja azul marca el día elegido."),
+        panel("pron-graf-3", "", "pron-3", alto=520, numero_grafico=3, fuente=FUENTE_PRONOSTICO)])
     contenido = html.Main(className="contenido", children=[
-        cabecera, html.Section(className="kpis-4", children=[tarjeta_pronostico(m) for m in MODOS_PRONOSTICO]),
+        cabecera_pronostico(pron),
+        html.Section(className="kpis-4", children=[tarjeta_pronostico(k) for k in TARJETAS_PRONOSTICO]),
         fila_1, fila_2])
     return html.Div(className="app", children=[barra_lateral_pronostico(pron), contenido])
 
 
-def tabla_pronostico(d, modo):
-    """Tabla con todas las localidades del día, ordenada según el botón elegido."""
+def chip(texto, color):
+    return html.Span(texto, className="tabla-chip", style={"background": color, "color": texto_sobre(color),
+                                                           "boxShadow": "inset 0 0 0 1px rgba(15,47,80,.12)"})
+
+
+def tabla_distritos(d, modo, buscar=""):
+    """Al lado del mapa: departamento, provincia y distrito, del más al menos afectado según el botón.
+    Con «Lluvias» salen solo los distritos con lluvia; con «Sin lluvias», solo los que no tienen lluvia."""
     cfg = MODOS_PRONOSTICO[modo]
     col = f"c_{modo}"
-    orden = {"lluvia": ([col, "tmax"], [False, False]), "calor": (["tmax", "tmin"], [False, False]),
-             "frio": (["tmin", "tmax"], [True, True]), "seco": ([col, "tmax"], [True, False])}[modo]
-    d = d.sort_values(orden[0], ascending=orden[1])
+    t = por_distrito(d)
+    if cfg["neutra"] is not None:
+        t = t[t[col] != cfg["neutra"]]
+    if buscar:
+        texto = normalizar(buscar)
+        t = t[(t["dpto"] + " " + t["provincia"] + " " + t["distrito"]).map(normalizar).str.contains(re.escape(texto))]
+    if modo == "temperatura":   # primero los más extremos, sean de calor o de frío
+        t = t.assign(extremo=np.maximum(t["tmax"] - (TEMPERATURA_ALTA - 1), (TEMPERATURA_BAJA + 1) - t["tmin"]))
+        t = t.sort_values("extremo", ascending=False)
+    else:
+        orden = {"lluvia": ([col, "tmax"], [False, False]), "seco": ([col, "tmax"], [True, False])}[modo]
+        t = t.sort_values(orden[0], ascending=orden[1])
+    if t.empty:
+        return html.P("Ningún distrito para mostrar.", className="tabla-vacia"), 0
     filas = []
-    for _, r in d.head(400).iterrows():
-        nombre, color = cfg["clases"][int(r[col])]
-        enlace = r.get("url_detalle")
+    for _, r in t.head(400).iterrows():
+        _, color, corto = cfg["clases"][int(r[col])]
+        if modo == "temperatura":   # la etiqueta dice la temperatura: máxima si es calor, mínima si es frío
+            calor = int(r[col]) >= 3
+            corto = f"{int(r['tmax'] if calor else r['tmin'])} °C {'máx.' if calor else 'mín.'}"
         filas.append(html.Tr([
-            html.Td([html.Span(className="criterio-color", style={"background": color}, title=nombre),
-                     html.Strong(r["localidad"])]),
-            html.Td(lugar_texto(r)),
-            html.Td(f"{int(r['tmax'])} °C", className="num"),
-            html.Td(f"{int(r['tmin'])} °C", className="num"),
-            html.Td(r["descripcion"], className="tabla-texto"),
-            html.Td(html.A("Ver", href=enlace, target="_blank", rel="noopener")
-                    if isinstance(enlace, str) and enlace.startswith("http") else "")]))
-    cabecera = html.Thead(html.Tr([html.Th("Localidad"), html.Th("Provincia y departamento"), html.Th("Máx."),
-                                   html.Th("Mín."), html.Th("Pronóstico"), html.Th("")]))
-    return html.Table(className="criterio tabla-pronostico", children=[cabecera, html.Tbody(filas)])
+            html.Td(nombre_visible(r["dpto"])),
+            html.Td(r["provincia"] or "—"),
+            html.Td(html.Div(className="tabla-lugar", children=[
+                html.Span(className="tabla-punto", style={"background": color}), html.Strong(r["distrito"])])),
+            html.Td(chip(corto, color)),
+            html.Td([html.Span(f"{int(r['tmax'])}°", className="temp temp-max"),
+                     html.Span(f"{int(r['tmin'])}°", className="temp temp-min")], className="num temps")]))
+    cabecera = html.Thead(html.Tr([html.Th("Departamento"), html.Th("Provincia"), html.Th("Distrito"),
+                                   html.Th(cfg["columna"]), html.Th("Máx. / Mín.")]))
+    return html.Table(className="tabla-pronostico", children=[cabecera, html.Tbody(filas)]), len(t)
 
 
 # ---- 5.10 Estilos CSS -----------------------------------------------------------------------
@@ -3824,11 +4045,12 @@ font-weight:800;font-size:13px;flex:none}
 .paso h4{font-size:15px;font-weight:750;color:var(--azul-ppt)}
 .paso p{font-size:13px;line-height:1.5;color:var(--tinta)}
 
-/* Pronóstico climático: tarjetas-botón, botones del mapa y detalle */
+/* Pronóstico climático */
 .kpi-boton{cursor:pointer;border-width:2px;transition:box-shadow .15s ease,border-color .15s ease,transform .15s ease}
 .kpi-boton:hover{box-shadow:var(--sombra-alta);transform:translateY(-2px)}
 .kpi-boton.activa{border-color:var(--pacifico-medio);background:linear-gradient(180deg,#f3f8fd 0%,#fff 60%)}
-.kpi-ver{margin-top:auto;padding-top:6px;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;
+.kpi-boton .kpi-valor{font-size:34px;line-height:1.1}
+.kpi-ver{margin-top:auto;padding-top:8px;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;
 color:var(--pacifico-medio)}
 .kpi-ver .icono{width:14px;height:14px}
 .kpi-boton.activa .kpi-ver{color:var(--azul-ppt)}
@@ -3837,11 +4059,12 @@ color:var(--pacifico-medio)}
 .pildoras{display:flex;flex-wrap:wrap;gap:8px}
 .pildoras label{margin:0!important;cursor:pointer}
 .pildoras input{position:absolute;opacity:0;width:0;height:0}
-.pildora{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:999px;border:1.5px solid var(--borde);
-background:#fff;font-size:14px;font-weight:700;color:var(--tinta);transition:background .15s ease,border-color .15s ease}
-.pildora .icono{width:18px;height:18px;color:var(--pacifico-medio)}
+.pildora{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;border:1.5px solid var(--borde);
+background:#fff;font-size:13.5px;font-weight:700;color:var(--tinta);transition:background .15s ease,border-color .15s ease}
+.pildora .icono{width:17px;height:17px;color:var(--pacifico-medio)}
 .pildoras label:hover .pildora{border-color:var(--pacifico-medio)}
-.pildoras label:has(input:checked) .pildora{background:var(--azul-ppt);border-color:var(--azul-ppt);color:#fff}
+.pildoras label:has(input:checked) .pildora{background:var(--azul-ppt);border-color:var(--azul-ppt);color:#fff;
+box-shadow:0 4px 12px rgba(11,42,91,.25)}
 .pildoras label:has(input:checked) .pildora .icono{color:#fff}
 .pron-hero{position:relative;overflow:hidden;border-radius:20px;padding:22px 28px;color:#fff;display:flex;
 align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;box-shadow:0 12px 30px rgba(11,42,91,.22);
@@ -3849,30 +4072,52 @@ background:radial-gradient(circle at 88% -30%,rgba(255,255,255,.20) 0,rgba(255,2
 linear-gradient(120deg,#0b2a5b 0%,#14508f 55%,#1f6fb2 100%)}
 .pron-hero::after{content:"";position:absolute;right:-50px;bottom:-90px;width:280px;height:280px;border-radius:50%;
 background:rgba(255,255,255,.06);pointer-events:none}
-.pron-hero-texto{position:relative;z-index:1;flex:1 1 520px;min-width:0}
+.pron-hero-texto{position:relative;z-index:1;flex:1 1 560px;min-width:0}
 .pron-hero-antetitulo{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:750;letter-spacing:.12em;
 text-transform:uppercase;color:#9fcbf2}
 .pron-hero-antetitulo .icono{width:18px;height:18px}
 .pron-hero h1{margin-top:6px;font-size:30px;line-height:1.15;font-weight:800;font-stretch:112%;letter-spacing:-.015em}
-.pron-hero-sub{margin-top:8px;font-size:15px;line-height:1.55;color:rgba(255,255,255,.88);max-width:95ch}
+.pron-hero-sub{margin-top:8px;font-size:15px;line-height:1.55;color:rgba(255,255,255,.88);max-width:100ch}
 .pron-hero-sub strong{color:#fff;font-weight:800}
-.pron-hero-dias{position:relative;z-index:1;display:flex;flex-direction:column;gap:8px}
-.pron-hero-etiqueta{font-size:12px;font-weight:750;letter-spacing:.1em;text-transform:uppercase;color:#9fcbf2}
-.pildoras-dia{gap:10px}
-.pildora.pildora-dia{flex-direction:column;gap:0;min-width:78px;padding:8px 16px;border-radius:14px;color:#fff;
-background:rgba(255,255,255,.08);border:1.5px solid rgba(255,255,255,.38);font-size:12px;font-weight:750;
-text-transform:uppercase;letter-spacing:.04em}
-.pildora-num{font-size:30px;line-height:1.05;font-weight:800;font-stretch:112%;letter-spacing:0}
-.pildoras label:hover .pildora.pildora-dia{border-color:#fff;background:rgba(255,255,255,.18)}
-.pildoras label:has(input:checked) .pildora.pildora-dia{background:#fff;border-color:#fff;color:var(--azul-ppt);
-box-shadow:0 6px 18px rgba(0,0,0,.22)}
+.pron-hero-estado{position:relative;z-index:1;display:flex;align-items:center;gap:12px;max-width:340px;padding:12px 16px;
+border-radius:14px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.28);font-size:12.5px;line-height:1.4}
+.pron-hero-estado strong{display:block;font-size:13.5px}
+.pron-hero-estado span{color:rgba(255,255,255,.85)}
+.pron-punto{flex:none;width:11px;height:11px;border-radius:50%;background:#3ddc84;animation:latido 2.2s ease-in-out infinite}
+.pron-hero-estado-archivo .pron-punto{background:#f5b041;animation:none;box-shadow:0 0 0 4px rgba(245,176,65,.25)}
+@keyframes latido{0%,100%{box-shadow:0 0 0 3px rgba(61,220,132,.30)}50%{box-shadow:0 0 0 8px rgba(61,220,132,.05)}}
 .lateral-ayuda{font-size:12.5px;line-height:1.45;color:rgba(255,255,255,.75)}
-.tabla-scroll{max-height:440px;overflow:auto;margin-top:4px}
-.tabla-pronostico{font-size:12.5px}
-.tabla-pronostico th{position:sticky;top:0;background:#fff;z-index:1}
-.tabla-pronostico td{vertical-align:top}
-.tabla-texto{color:var(--tinta-2);min-width:220px}
-.tabla-pronostico a{color:var(--pacifico-medio);font-weight:700}
+.tabla-vacia{font-size:13px;color:var(--tinta-2);padding:14px;border-radius:12px;background:var(--niebla)}
+.tabla-herramientas{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:2px 0 10px}
+.buscador{width:min(420px,100%);font-family:var(--fuente);font-size:13.5px;color:var(--tinta);padding:9px 14px;
+border:1.5px solid var(--borde);border-radius:999px;background:#fff}
+.buscador:focus{outline:none;border-color:var(--pacifico-medio);box-shadow:0 0 0 3px rgba(31,111,178,.15)}
+.tabla-conteo{font-size:12.5px;font-weight:650;color:var(--tinta-2)}
+.tabla-scroll{max-height:610px;overflow:auto;border:1px solid var(--borde);border-radius:14px}
+.tabla-pronostico{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tabla-pronostico th{position:sticky;top:0;z-index:1;background:#f3f7fc;text-align:left;font-size:11.5px;font-weight:750;
+letter-spacing:.05em;text-transform:uppercase;color:var(--pacifico);padding:11px 12px;border-bottom:1px solid var(--borde)}
+.tabla-pronostico td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:top;color:var(--tinta)}
+.tabla-pronostico .temps .temp{min-width:36px;padding:2px 6px;font-size:12px}
+.tabla-pronostico th{white-space:nowrap}
+.tabla-pronostico .temps .temp+.temp{margin-left:4px}
+.tabla-pronostico tbody tr:nth-child(even) td{background:#fbfcfe}
+.tabla-pronostico tbody tr:hover td{background:#eef5fc}
+.tabla-pronostico td.num{text-align:right;white-space:nowrap}
+.tabla-lugar{display:flex;gap:8px;align-items:flex-start}
+.tabla-punto{flex:none;width:11px;height:11px;margin-top:5px;border-radius:50%;box-shadow:0 0 0 2px #fff,0 0 0 3px #c9d3de}
+.tabla-lugar strong{display:block;font-size:13.5px;color:var(--azul-ppt)}
+.tabla-sub{display:block;font-size:11.5px;color:var(--tinta-3)}
+.tabla-chip{display:inline-block;font-size:11.5px;font-weight:750;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.temp{display:inline-block;min-width:54px;text-align:center;font-weight:800;font-size:12.5px;padding:3px 8px;border-radius:8px;
+font-variant-numeric:tabular-nums}
+.temp-max{background:#fde8e1;color:#b23a12}
+.temp-min{background:#e3effb;color:#1d5c9e}
+.tabla-texto{color:var(--tinta-2);min-width:260px;line-height:1.45}
+.tabla-enlace{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:750;color:var(--pacifico-medio);
+text-decoration:none;padding:4px 10px;border:1px solid var(--borde);border-radius:999px;white-space:nowrap;background:#fff}
+.tabla-enlace:hover{background:var(--niebla)}
+.tabla-enlace .icono{width:13px;height:13px}
 
 /* Pantallas medianas */
 @media (max-width:1280px){
@@ -3948,6 +4193,7 @@ def registrar_navegacion(app, clima, base_id, inform, latam, costos, pronostico=
     @app.callback(Output("pagina", "children"), Input("url", "pathname"))
     def mostrar_pagina(ruta):
         ruta = (ruta or "/").rstrip("/") or "/"
+        pronostico = pronostico_vigente()   # el más reciente (se actualiza solo desde la web del SENAMHI)
         if ruta == RUTA_CLIMA and clima is not None:
             return crear_layout_clima(clima)
         if ruta in (RUTA_ID, "/ird") and base_id is not None:
@@ -4550,111 +4796,126 @@ def registrar_callbacks_costos(app, costos):
 
 
 # ---- 6.7 Pronóstico climático ----------------------------------------------------------------------
-def registrar_callbacks_pronostico(app, pron, geo_dptos):
-    modos = list(MODOS_PRONOSTICO)
-    prov_a_dpto = {f["properties"]["IDPROV"]: f["properties"]["NOMBDEP"] for f in pron["geo_prov"]["features"]}
-    dptos = set(pron["datos"]["dpto"])
+def registrar_callbacks_pronostico(app, geo_dptos):
+    """Los datos se toman cada vez de pronostico_vigente(): así se usa el pronóstico más reciente del SENAMHI."""
+
+    def vigente(dia, dpto):
+        """Pronóstico actual, con el día y el departamento corregidos si el pronóstico ya cambió."""
+        pron = pronostico_vigente()
+        if pron is None:
+            return None, dia, dpto
+        fechas = [f.strftime("%Y-%m-%d") for f in pron["fechas"]]
+        dia = dia if dia in fechas else fechas[0]
+        dpto = dpto if dpto == NACIONAL or dpto in set(pron["datos"]["dpto"]) else NACIONAL
+        return pron, dia, dpto
 
     # Clic en una tarjeta -> ese botón del mapa; la tarjeta elegida queda enmarcada
-    @app.callback(Output("pron-modo", "value"), [Input(f"pron-kpi-{m}", "n_clicks") for m in modos],
+    tarjetas = list(TARJETAS_PRONOSTICO)
+
+    @app.callback(Output("pron-modo", "value"), [Input(f"pron-kpi-{k}", "n_clicks") for k in tarjetas],
                   prevent_initial_call=True)
     def elegir_modo(*clics):
         origen = ctx.triggered_id
         if not isinstance(origen, str) or not any(clics):
             return no_update
-        return origen.replace("pron-kpi-", "")
+        return TARJETAS_PRONOSTICO[origen.replace("pron-kpi-", "")][3]
 
-    @app.callback([Output(f"pron-kpi-{m}", "className") for m in modos], Input("pron-modo", "value"))
+    @app.callback([Output(f"pron-kpi-{k}", "className") for k in tarjetas], Input("pron-modo", "value"))
     def enmarcar_modo(modo):
-        return ["kpi kpi-boton activa" if m == modo else "kpi kpi-boton" for m in modos]
+        return ["kpi kpi-boton activa" if TARJETAS_PRONOSTICO[k][3] == modo else "kpi kpi-boton" for k in tarjetas]
 
-    # Clic en el mapa -> departamento de esa provincia o localidad; botón -> todo el Perú
+    # Clic en el mapa -> departamento de esa provincia; botón -> todo el Perú
     @app.callback(Output("pron-dpto", "value"), Input("pron-graf-1", "clickData"),
                   Input("pron-btn-reiniciar", "n_clicks"), State("pron-dpto", "value"), prevent_initial_call=True)
     def sincronizar_pronostico(clic, _n, actual):
         if ctx.triggered_id == "pron-btn-reiniciar":
             return NACIONAL
+        pron = pronostico_vigente()
+        if pron is None:
+            return no_update
         punto = ((clic or {}).get("points") or [{}])[0]
+        prov_a_dpto = {f["properties"]["IDPROV"]: f["properties"]["NOMBDEP"] for f in pron["geo_prov"]["features"]}
         dpto = prov_a_dpto.get(str(punto.get("location", "")))
-        if dpto is None and punto.get("lon") is not None:   # clic en un punto (localidad)
-            cerca = pron["datos"].dropna(subset=["lon"])
-            fila = cerca.loc[((cerca["lon"] - punto["lon"]) ** 2 + (cerca["lat"] - punto["lat"]) ** 2).idxmin()]
-            dpto = fila["dpto"]
-        if dpto not in dptos:
+        if dpto not in set(pron["datos"]["dpto"]):
             return no_update
         return NACIONAL if dpto == actual else dpto   # segundo clic en el mismo departamento = todo el Perú
 
-    # Barra lateral, encabezado y las 4 tarjetas
+    # Barra lateral, banda azul y las 4 tarjetas (número de distritos)
     @app.callback([Output("pron-lateral-dia", "children"), Output("pron-lateral-lugar", "children"),
                    Output("pron-titulo", "children"), Output("pron-sub", "children")]
-                  + [Output(f"pron-kpi-{m}-{parte}", "children") for m in modos for parte in ("valor", "nota")],
+                  + [Output(f"pron-kpi-{k}-{parte}", "children") for k in tarjetas for parte in ("valor", "nota")],
                   Input("pron-dia", "value"), Input("pron-dpto", "value"))
     def actualizar_resumen_pronostico(dia, dpto):
+        pron, dia, dpto = vigente(dia, dpto)
+        if pron is None:
+            return [no_update] * (4 + 2 * len(tarjetas))
         fecha = pd.Timestamp(dia)
-        d = pronostico_del(pron, dia, dpto)
+        t = por_distrito(pronostico_del(pron, dia, dpto))
         lugar = "Todo el Perú" if dpto == NACIONAL else nombre_visible(dpto)
-        en_lugar = "el Perú" if dpto == NACIONAL else nombre_visible(dpto)
-        n = len(d)
-        salida = [dia_corto(fecha), lugar, f"{lugar}, {dia_largo(fecha)}"]
-        if n == 0:
-            return salida + ["Sin pronóstico para esta selección."] + ["—", "Sin pronóstico"] * len(modos)
-        alta, baja = d.loc[d["tmax"].idxmax()], d.loc[d["tmin"].idxmin()]
-        salida.append([
-            "Se pronostica lluvia en ", html.Strong(f"{int((d['c_lluvia'] > 0).sum())} de {n} localidades"),
-            f" ({int((d['c_lluvia'] == 3).sum())} con lluvia fuerte o tormenta). La temperatura llegará a ",
-            html.Strong(f"{int(alta['tmax'])} °C"), f" en {alta['localidad']} y bajará a ",
-            html.Strong(f"{int(baja['tmin'])} °C"), f" en {baja['localidad']}."])
-        clases = {m: MODOS_PRONOSTICO[m]["clases"] for m in modos}
-        con_lluvia = d[d["c_lluvia"] > 0]
-        fuerte, moderada = int((d["c_lluvia"] == 3).sum()), int((d["c_lluvia"] == 2).sum())
-        salida += [[html.Span(f"{len(con_lluvia)}"), html.Span(f" de {n}", className="kpi-unidad")],
-                   f"{fuerte} con lluvia fuerte o tormenta · {moderada} con lluvia moderada"]
-        caliente = d.loc[d["tmax"].idxmax()]
-        salida += [f"{int(caliente['tmax'])} °C",
-                   f"{caliente['localidad']} ({nombre_visible(caliente['dpto'])}) · "
-                   f"{int((d['tmax'] >= UMBRALES_CALOR[2]).sum())} localidades con 30 °C a más"]
-        fria = d.loc[d["tmin"].idxmin()]
-        salida += [f"{int(fria['tmin'])} °C",
-                   f"{fria['localidad']} ({nombre_visible(fria['dpto'])}) · "
-                   f"{int((d['tmin'] <= UMBRALES_FRIO[0]).sum())} con helada (0 °C o menos)"]
-        secas = d[d["c_seco"] < 2]
-        salida += [[html.Span(f"{len(secas)}"), html.Span(f" de {n}", className="kpi-unidad")],
-                   f"{int((d['c_seco'] == 0).sum())} con cielo despejado o brillo solar"]
-        return salida
+        total = len(t)
+        con_lluvia, fuertes = int((t["c_lluvia"] > 0).sum()), int((t["c_lluvia"] == 3).sum())
+        altas, bajas = int((t["tmax"] >= TEMPERATURA_ALTA).sum()), int((t["tmin"] <= TEMPERATURA_BAJA).sum())
+        secos = int((t["c_lluvia"] == 0).sum())
+        resumen = ["Se pronostica lluvia en ", html.Strong(f"{con_lluvia} de {total} distritos"),
+                   f" ({fuertes} con lluvia fuerte o tormenta). Habrá temperaturas altas ({TEMPERATURA_ALTA} °C a más) en ",
+                   html.Strong(f"{altas}"), f" distrito{'s' if altas != 1 else ''} y bajas ({TEMPERATURA_BAJA} °C o menos) en ",
+                   html.Strong(f"{bajas}"), "."]
+        de_total = html.Span(f" de {total}", className="kpi-unidad")
+        return [dia_corto(fecha), lugar, f"{lugar}, {dia_largo(fecha)}", resumen,
+                [html.Span(str(con_lluvia)), de_total],
+                f"{fuertes} con lluvia fuerte o tormenta · {int((t['c_lluvia'] == 2).sum())} con lluvia moderada",
+                [html.Span(str(altas)), html.Span(f" de {total}", className="kpi-unidad")],
+                f"{int((t['tmax'] >= UMBRALES_CALOR[-1]).sum())} con {UMBRALES_CALOR[-1]} °C a más",
+                [html.Span(str(bajas)), html.Span(f" de {total}", className="kpi-unidad")],
+                f"{int((t['tmin'] <= HELADA).sum())} con helada ({HELADA} °C o menos)",
+                [html.Span(str(secos)), html.Span(f" de {total}", className="kpi-unidad")],
+                f"{int((t['c_seco'] == 0).sum())} con cielo despejado"]
 
-    # Los 3 gráficos numerados y el detalle por localidad
+    # Mapa y gráficos 2 y 3
     @app.callback([Output(f"pron-graf-{g}{parte}", prop) for g in (1, 2, 3)
-                   for parte, prop in (("", "figure"), ("-titulo", "children"), ("-unidad", "children"))]
-                  + [Output("pron-tabla", "children"), Output("pron-tabla-titulo", "children")],
+                   for parte, prop in (("", "figure"), ("-titulo", "children"), ("-unidad", "children"))],
                   Input("pron-dia", "value"), Input("pron-modo", "value"), Input("pron-dpto", "value"))
     def actualizar_graficos_pronostico(dia, modo, dpto):
+        pron, dia, dpto = vigente(dia, dpto)
+        if pron is None:
+            return [no_update] * 9
         fecha = pd.Timestamp(dia)
         cfg = MODOS_PRONOSTICO[modo]
         nacional = dpto == NACIONAL
         donde = "el Perú" if nacional else nombre_visible(dpto)
-        de_donde = "del Perú" if nacional else f"de {nombre_visible(dpto)}"
-        tema = {"lluvia": "Lluvias", "calor": "Temperatura máxima", "frio": "Temperatura mínima",
-                "seco": "Zonas sin lluvia"}[modo]
-        if modo == "lluvia":
-            titulo_2 = f"Localidades con lluvia por {'departamento' if nacional else 'provincia'}, {dia_corto(fecha)}"
-            unidad_2 = "(N.º de localidades, según la intensidad de la lluvia)"
-        elif modo == "seco":
-            titulo_2 = f"Localidades sin lluvia por {'departamento' if nacional else 'provincia'}, {dia_corto(fecha)}"
-            unidad_2 = "(% de las localidades de cada lugar)"
-        elif modo == "calor":
-            titulo_2, unidad_2 = f"Las 15 localidades más calurosas {de_donde}, {dia_corto(fecha)}", "(Temperatura máxima, °C)"
-        else:
-            titulo_2, unidad_2 = f"Las 15 localidades más frías {de_donde}, {dia_corto(fecha)}", "(Temperatura mínima, °C)"
-        unidad_1 = {"lluvia": "(Intensidad de la lluvia pronosticada)", "calor": "(Temperatura máxima, °C)",
-                    "frio": "(Temperatura mínima, °C)", "seco": "(Lugares donde no se pronostica lluvia)"}[modo]
+        por = "departamento" if nacional else "provincia"
+        dc = dia_corto(fecha)
+        unidades_1 = {"lluvia": "(Intensidad de la lluvia pronosticada)",
+                      "temperatura": f"(Calor: máxima de {TEMPERATURA_ALTA} °C a más · frío: mínima de {TEMPERATURA_BAJA} °C o menos)",
+                      "seco": "(Lugares donde no se pronostica lluvia)"}
+        titulos_3 = {"lluvia": (f"Localidades con lluvia por {por}, {dc}", f"(% de las localidades de cada {por}, según la intensidad)"),
+                     "temperatura": (f"Localidades con calor o frío por {por}, {dc}", f"(% de las localidades de cada {por})"),
+                     "seco": (f"Localidades sin lluvia por {por}, {dc}", f"(% de las localidades de cada {por})")}
         dias = f"{dia_corto(pron['fechas'][0])} – {dia_corto(pron['fechas'][-1])}"
         return (grafico_mapa_pronostico(pron, dia, modo, dpto, geo_dptos),
-                f"Mapa de pronóstico: {tema.lower()} en {donde}, {dia_corto(fecha)}", unidad_1,
-                grafico_ranking_pronostico(pron, dia, modo, dpto), titulo_2, unidad_2,
+                f"Mapa de pronóstico: {cfg['tema']} en {donde}, {dc}", unidades_1[modo],
                 grafico_dias_pronostico(pron, dia, modo, dpto),
-                f"{tema} en los próximos días: {donde}, {dias}", "(N.º de localidades de cada clase)",
-                tabla_pronostico(pronostico_del(pron, dia, dpto), modo),
-                f"{'todo el Perú' if nacional else donde}, {dia_corto(fecha)}")
+                f"{cfg['tema'].capitalize()} en los próximos días: {donde}, {dias}", "(N.º de localidades)",
+                grafico_barras_pronostico(pron, dia, modo, dpto), *titulos_3[modo])
+
+    # Detalle por distrito (al lado del mapa, con buscador)
+    @app.callback(Output("pron-tabla", "children"), Output("pron-tabla-titulo", "children"),
+                  Output("pron-tabla-unidad", "children"), Output("pron-tabla-conteo", "children"),
+                  Input("pron-dia", "value"), Input("pron-modo", "value"), Input("pron-dpto", "value"),
+                  Input("pron-buscar", "value"))
+    def actualizar_tabla_pronostico(dia, modo, dpto, buscar):
+        pron, dia, dpto = vigente(dia, dpto)
+        if pron is None:
+            return no_update, no_update, no_update, no_update
+        tabla, n = tabla_distritos(pronostico_del(pron, dia, dpto), modo, (buscar or "").strip())
+        lugar = "todo el Perú" if dpto == NACIONAL else nombre_visible(dpto)
+        que = {"lluvia": "distritos con lluvia", "temperatura": "distritos con calor o frío",
+               "seco": "distritos sin lluvia"}[modo]
+        orden = {"lluvia": "primero la lluvia más intensa", "temperatura": "primero los más extremos, de calor o de frío",
+                 "seco": "primero los de cielo despejado"}[modo]
+        return (tabla, f"{que} en {lugar}, {dia_corto(pd.Timestamp(dia))}",
+                f"(Departamento, provincia y distrito; {orden})",
+                f"{n} distrito{'s' if n != 1 else ''}" + (" (se muestran 400)" if n > 400 else ""))
 
 
 # =============================================================================
@@ -4666,13 +4927,21 @@ BASE_ID = cargar_id()
 INFORM = cargar_inform()
 LATAM = cargar_latam()
 COSTOS = cargar_costos()
-PRONOSTICO = cargar_pronostico()
+PRONOSTICO = iniciar_pronostico()   # web del SENAMHI (o el Excel, si la web no responde)
 
 app = Dash(__name__, title=f"{TITULO_PORTADA} | Perú", external_stylesheets=[URL_FUENTES],
            suppress_callback_exceptions=True,  # las páginas se dibujan según la dirección
            meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
 app.index_string = PAGINA
 server = app.server
+
+
+@server.before_request
+def revisar_pronostico_al_visitar():   # cada visita revisa si toca traer el pronóstico nuevo (en segundo plano)
+    try:
+        revisar_pronostico()
+    except Exception:
+        pass
 
 
 @server.route("/imagenes/<path:archivo>")
@@ -4714,8 +4983,7 @@ if LATAM is not None:
     registrar_callbacks_latam(app, LATAM)
 if COSTOS is not None:
     registrar_callbacks_costos(app, COSTOS)
-if PRONOSTICO is not None:
-    registrar_callbacks_pronostico(app, PRONOSTICO, GEOJSON)
+registrar_callbacks_pronostico(app, GEOJSON)
 
 if __name__ == "__main__":
     # En JupyterLab: "external" muestra el enlace http://127.0.0.1:8050 (ábrelo en el navegador).
