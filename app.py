@@ -356,8 +356,10 @@ TOP_DEPARTAMENTOS = 12
 URL_SENAMHI = "https://www.senamhi.gob.pe/?p=pronostico-meteorologico"
 ACTUALIZAR_PRONOSTICO_HORAS = 3
 REINTENTAR_PRONOSTICO_MINUTOS = 10
-ARCHIVOS_PRONOSTICO = [os.path.join(CARPETA, n) for n in ("senamhi_pronostico_nacional_2.xlsx",
-                                                          "senamhi_pronostico_nacional.xlsx")]
+#   El Excel lo actualiza cada día GitHub (archivo .github/workflows/senamhi.yml, que corre scraping_senamhi.py),
+#   porque la web del SENAMHI no deja entrar al servidor de Render. Se usa el primer archivo que exista:
+ARCHIVOS_PRONOSTICO = [os.path.join(CARPETA, n) for n in ("senamhi_pronostico_nacional.xlsx",
+                                                          "senamhi_pronostico_nacional_2.xlsx")]
 HOJA_PRONOSTICO = "Pronostico"
 FUENTE_PRONOSTICO = "Fuente: SENAMHI, pronóstico del tiempo por localidad. Elaboración: DRF-VMH."
 # Mapas de provincias y distritos (si no están en la carpeta, se descargan y se guardan ahí)
@@ -1593,11 +1595,11 @@ def preparar_pronostico(crudo, origen, actualizado):
             "origen": origen, "actualizado": actualizado}
 
 
-def cargar_pronostico(web=True, intentos=3):
+def cargar_pronostico(web=True, intentos=3, espera=40):
     """Primero la página del SENAMHI; si no responde, el último Excel de la carpeta. Si no hay nada, None."""
     if web:
         try:
-            crudo = descargar_pronostico_web(intentos=intentos)
+            crudo = descargar_pronostico_web(intentos=intentos, espera=espera)
             _PRONOSTICO["error"] = ""
             return preparar_pronostico(crudo, "web", ahora_lima().strftime("%d/%m/%Y %H:%M"))
         except Exception as error:
@@ -1621,7 +1623,7 @@ _CANDADO_PRONOSTICO = threading.Lock()
 
 def iniciar_pronostico():
     """Al encender el tablero: un intento rápido en la web del SENAMHI y, si falla, el Excel."""
-    _PRONOSTICO["datos"] = cargar_pronostico(web=True, intentos=1)
+    _PRONOSTICO["datos"] = cargar_pronostico(web=True, intentos=1, espera=10)
     _PRONOSTICO["revisado"] = time.time()
     return _PRONOSTICO["datos"]
 
@@ -3627,15 +3629,14 @@ def barra_lateral_pronostico(pron):
 
 
 def cabecera_pronostico(pron):
-    """Banda azul: lugar y día, un resumen en una frase y cuándo se actualizó."""
-    web = pron["origen"] == "web"
-    estado = html.Div(className="pron-hero-estado" + ("" if web else " pron-hero-estado-archivo"), children=[
-        html.Span(className="pron-punto"),
-        html.Div([html.Strong("Se actualiza solo" if web else "Datos del último archivo"),
-                  html.Span(f"Web del SENAMHI · {pron['actualizado']}" if web else
-                            f"La web del SENAMHI no respondió; se vuelve a intentar sola · {pron['actualizado']}"),
-                  html.Small(f"Motivo: {_PRONOSTICO['error'][:160]}", className="pron-hero-motivo")
-                  if not web and _PRONOSTICO["error"] else None])])
+    """Banda azul: lugar y día, un resumen en una frase y si el pronóstico está al día."""
+    al_dia = bool(pron["fechas"]) and pron["fechas"][0].date() >= ahora_lima().date()
+    detalle = [html.Strong("Pronóstico al día" if al_dia else "Pronóstico desactualizado"),
+               html.Span(f"Consulta al SENAMHI: {pron['actualizado']}")]
+    if not al_dia and _PRONOSTICO["error"]:
+        detalle.append(html.Small(f"Motivo: {_PRONOSTICO['error'][:160]}", className="pron-hero-motivo"))
+    estado = html.Div(className="pron-hero-estado" + ("" if al_dia else " pron-hero-estado-archivo"),
+                      children=[html.Span(className="pron-punto"), html.Div(detalle)])
     return html.Header(className="pron-hero", children=[
         html.Div(className="pron-hero-texto", children=[
             html.P([icono("nube"), "Pronóstico climático · SENAMHI"], className="pron-hero-antetitulo"),
